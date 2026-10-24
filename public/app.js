@@ -38,6 +38,8 @@ const I = {
   caret: svg(14, 14, line('M3 5l4 4 4-4')),
   chevron: svg(16, 16, line('M6 3.5L10.5 8 6 12.5', '#1D1A2F', 2)),
   loop: svg(28, 28, line('M14 4a10 10 0 019.5 7M24 7.5l-.5 3.5-3.5-.5M14 24a10 10 0 01-9.5-7M4 20.5l.5-3.5 3.5.5'), 'style="flex-shrink:0"'),
+  // Lucide "bell" (ISC licence, 24 grid), scaled like the gear.
+  bell: svg(20, 20, '<g transform="scale(0.8333)">' + line('M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0', '#1D1A2F', 2.2) + '</g>'),
   // A toothed cog (Lucide "settings", ISC licence, drawn on a 24 grid). The old ring-and-rays read as a theme/sun icon.
   gear: svg(20, 20, '<g transform="scale(0.8333)">' + line('M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z', '#1D1A2F', 2.2) + '<circle cx="12" cy="12" r="3" fill="none" stroke="#1D1A2F" stroke-width="2.2"/></g>')
 };
@@ -216,7 +218,7 @@ function tabbar(active) {
   return `<nav class="tabbar" aria-label="Main">${[['chat', 'Chat'], ['feed', 'Feed'], ['adventures', 'Adventures'], ['you', 'You']].map(([v, l]) => `<button class="tab ${active === v ? 'active' : ''}" data-action="tab" data-view="${v}" ${active === v ? 'aria-current="page"' : ''}>${l}${v === 'adventures' && needsMe() ? '<i class="dot" aria-hidden="true"></i><span class="sr-only"> (needs you)</span>' : ''}</button>`).join('')}</nav>`;
 }
 function notificationUnread() { return (S.notifications || []).filter(n => !ui.readNotifications.has(n.unreadKey)).length; }
-function notificationButton() { const n = notificationUnread(); return `<button class="icon-circle" data-action="notifications" aria-label="Notifications${n ? `, ${n} unread` : ''}">${n ? `<span class="notif-dot">${n > 9 ? '9+' : n}</span>` : '·'}</button>`; }
+function notificationButton() { const n = notificationUnread(); return `<button class="icon-circle" data-action="notifications" aria-label="Notifications${n ? `, ${n} unread` : ''}">${I.bell}${n ? `<span class="notif-dot" aria-hidden="true">${n > 9 ? '9+' : n}</span>` : ''}</button>`; }
 const rootTab = () => stack[0].name;
 function brandbar(right) {
   return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button><div class="header-actions">${notificationButton()}${right || ''}</div></header>`;
