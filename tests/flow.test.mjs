@@ -603,7 +603,7 @@ test('Google venue facts stay in memory (never the saved DB), are reused for 15 
   try {
     const venue = Object.values(store.data.places).find(p => /restaurant/i.test(p.category)).id;
     const facts = await engine.facts(venue, nextSaturday(), '19:00'); assert.equal(facts.provider, 'google'); assert.equal(facts.date, nextSaturday());
-    assert.deepEqual(store.data.facts, {}, 'Places content is not written to the persisted cache'); assert.equal(store.data.googleIds[venue], 'gid-3');
+    assert.deepEqual(Object.keys(store.data.facts), [], 'Places content is not written to the persisted cache'); assert.equal(store.data.googleIds[venue], 'gid-3');
     await engine.facts(venue, nextSaturday(), '19:00'); assert.equal(calls, 1, 'reused within 15 minutes');
     open = false; const closed = await engine.facts(venue, nextSaturday(), '23:00');
     assert.ok(evaluatePrivate(engine.context('ricky'), { place: store.data.places[venue], date: nextSaturday(), time: '19:00', allowance: 20 }, closed).codes.includes('closed'));

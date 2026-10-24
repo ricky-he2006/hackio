@@ -394,8 +394,8 @@ function planAttachment(p) {
 function lastEntry(p, userId) { return p.log.filter(l => l.userId === userId && l.round === p.round).at(-1); }
 function roundingCard(p) {
   const invitees = p.participants.filter(u => !isMe(u)), d = dparts(p.option.date);
-  const rows = invitees.map(u => { const last = lastEntry(p, u.id); return last?.type === 'accept' ? checkRow(`${first(u)} is free ${d.long} ${partOfDay(p.option.time)}`) : last?.type === 'counter' ? counterRow(`${first(u)} asked for another option`) : spinRow(`Asking ${first(u)}…`); });
-  const done = invitees.filter(u => lastEntry(p, u.id)?.type === 'accept').length;
+  const rows = invitees.map(u => { const last = lastEntry(p, u.id); return last?.type === 'checked' ? checkRow(`${first(u)}: checked privately`) : last?.type === 'accept' ? checkRow(`${first(u)} is free ${d.long} ${partOfDay(p.option.time)}`) : last?.type === 'counter' ? counterRow(`${first(u)} asked for another option`) : spinRow(`Asking ${first(u)}…`); });
+  const done = invitees.filter(u => ['accept', 'checked'].includes(lastEntry(p, u.id)?.type)).length;
   const ready = p.state === 'awaiting_approval', stuck = p.state === 'needs_decision';
   return `<div class="card pad-14 sh-4 col gap-8"><div class="row between"><span class="eyebrow">${ready ? 'Your party is ready' : stuck ? 'Your call' : 'Rounding up your party'}</span><span class="meta">${done} of ${invitees.length}</span></div>${rows.join('')}
     ${stuck ? `<p class="body-14">${esc(p.issue || '')}</p>` : ''}<button class="link" style="align-self:flex-start;margin-top:2px" data-action="${ready ? 'approve-open' : 'working'}" data-id="${esc(p.id)}">${ready ? 'See the route' : 'See details'}</button></div>`;
@@ -596,7 +596,8 @@ function agentRows(p, u) {
   const rows = [];
   for (let round = 1; round < p.round; round++) if (p.log.some(l => l.userId === u.id && l.round === round && l.type === 'counter')) rows.push(counterRow(`Asked for another option. ${round === p.round - 1 ? 'Moved the plan.' : ''}`));
   const last = lastEntry(p, u.id);
-  if (last?.type === 'accept') rows.push(checkRow('Time, budget and food work'));
+  if (last?.type === 'checked') rows.push(checkRow('Checked privately'));
+  else if (last?.type === 'accept') rows.push(checkRow('Time, budget and food work'));
   else if (last?.type === 'counter') rows.push(counterRow('Asked for another option'));
   else if (p.state === 'negotiating') rows.push(spinRow(p.round > 1 ? 'Checking the new proposal' : 'Checking privately…'));
   else if (p.state === 'needs_decision') rows.push(counterRow('Couldn’t make this one work'));
@@ -711,7 +712,7 @@ function changeScreen(p) {
     <form class="form" data-form="tell" data-id="${esc(p.id)}" data-done="details"><label class="sr-only" for="tell">What changed?</label><textarea id="tell" class="textarea hand" style="height:110px" maxlength="500" placeholder="can’t do ${t12(p.option.time, false)}, could do ${t12(plus(p.option.time, 30), false)}">${esc(drafts.tell || '')}</textarea>${lockNote('Only your agent sees what you write.')}<button class="btn primary lg">Send to my agent</button></form></main>`;
   return `${titlebar('Change something', { size: 't30', sub: 'Your guest list stays the same. Agents recheck with everyone.', subMuted: true })}<main class="content" data-scroll><form id="tweak-form" class="form" data-id="${esc(p.id)}">
     <div class="two"><label class="lbl">Day<input class="input" name="date" type="date" value="${esc(p.option.date)}" required></label><label class="lbl">Time<input class="input" name="time" type="time" value="${esc(p.option.time)}" required></label></div>
-    <label class="lbl">Proposed spend per person ($)<input class="input" name="allowance" type="number" min="0" max="10000" value="${esc(p.option.allowance)}" required></label>
+    <label class="lbl">Proposed spend per person ($)<input class="input" name="allowance" step="5" type="number" min="0" max="10000" value="${esc(p.option.allowance)}" required></label>
     <label class="lbl">Where<select class="select" name="placeId">${p.candidates.map(c => `<option value="${esc(c.place.id)}" ${c.place.id === p.option.place.id ? 'selected' : ''}>${esc(c.place.name)}</option>`).join('')}</select></label>
     <label class="lbl">After that (optional)<select class="select" name="activityId"><option value="">Keep it to one stop</option>${(S.activities || []).map(a => `<option value="${esc(a.id)}" ${a.id === p.option.activity?.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
     <button class="btn primary lg">Recheck with everyone</button></form></main>`;
@@ -828,12 +829,12 @@ function factsScreen(r) {
 
 /* Login */
 async function loginScreen() {
-  const accounts = await api('/accounts');
+  const [accounts, health] = await Promise.all([api('/accounts'), api('/health')]);
   $('#app').innerHTML = `<main class="login"><div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div><div class="row gap-12">${ball(66)}<div><p class="wordmark" style="font-size:44px;line-height:46px">Disco</p><p class="eyebrow muted" style="letter-spacing:.08em;margin-top:6px">Stress less, party more</p></div></div>
     <h1 class="title t30">Your friends’ picks, turned into plans.</h1><p class="body-15 muted">Ask for anything your friends vouch for. Pick your people, and your agents work out the rest.</p>
     <form id="login-form" class="card r16 pad-16 sh-4 form"><fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Who are you?</legend><div class="toggle-row">${accounts.map((u, i) => `<label><input type="radio" name="username" value="${esc(u.id)}" ${(slot === u.id || (!MAIN_IDS.includes(slot) && i === 0)) ? 'checked' : ''}><span>${av(u, 28)}${esc(u.name)}</span></label>`).join('')}</div></fieldset>
       <label class="lbl">Password<input class="input" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required></label><button class="btn primary lg" type="submit">Let’s go</button></form>
-    <p class="meta center">Prepared demo accounts · Password: <strong>disco2026</strong> unless your team changed it.</p></main>`;
+    <p class="meta center">Prepared demo accounts${health.defaultPassword ? ' · Password: <strong>disco2026</strong>' : ' · Ask your team for the password'}</p></main>`;
 }
 
 /* ---------- Render ---------- */

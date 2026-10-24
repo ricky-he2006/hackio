@@ -75,6 +75,8 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 
 ## Privacy boundary
 
+See [docs/SECURITY.md](docs/SECURITY.md) for protections and known limits.
+
 `Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
 
 - **Model inputs are allow-listed.** A person’s model gets only the fields it reasons over from their own context (budget, hours, days, diet, preferences, interests, energy). Saved-memory history, raw web text, rendered search HTML, and URLs are not sent.
@@ -82,7 +84,7 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 - **Strict diets need evidence.** A strict diet (e.g. “halal”, not “halal preferred”) passes when a well-rated review the person can see is tagged with it, or when a web source claims it. A web-only pass gets a private “check with the restaurant” note from that person’s own agent; the group is never told anyone’s diet.
 - **Untrusted text is kept out of instructions.** User-added items’ names never reach web search or the chat model, and listed venues enter the search prompt as a labelled data block.
 - **Shared free time is coarse.** “It’s a match” cards say “Both free Saturday evening”, never the exact overlap, which would reveal a friend’s private hours.
-- **Accepted trade-off:** because counters say *what* kind of change is needed, a host who keeps revising one plan can narrow down a friend’s rough budget band or free hours. Disco is built for trusted friend groups, so this is accepted; exact values and reasons still stay with each agent.
+- **Inference protections:** other agents’ individual verdicts stay private, proposed allowances round down in $5 steps, and negotiations are capped per friend per day. Group outcomes still reveal some information; see the security document for limits.
 
 The application server stores the contexts and is trusted infrastructure; this is logical per-agent access separation, not end-to-end encryption or isolated model processes. The local demo is bound to loopback by default. Production rollout would need HTTPS, deployment configuration, account management, stronger operational controls, and a proper database migration strategy.
 

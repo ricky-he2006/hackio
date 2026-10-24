@@ -8,6 +8,17 @@ import { providerStatus, checkProvider } from './lib/providers.mjs';
 
 const publicDir = resolve('public');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
+// Fixed-window counters. Keys are user ids or socket addresses; the map is pruned so it cannot grow without bound.
+export function limiter(max, windowMs) {
+  const hits = new Map();
+  const entry = key => { let h = hits.get(key); if (!h || Date.now() - h.since > windowMs) { if (hits.size > 10_000) hits.clear(); h = { since: Date.now(), count: 0 }; hits.set(key, h); } return h; };
+  return { hit: key => ++entry(key).count <= max, blocked: key => entry(key).count >= max };
+}
+// A DNS-rebinding page reaches loopback under its own hostname; only names we serve are accepted.
+const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]', ...(process.env.ALLOWED_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean)]);
+const hostAllowed = host => allowedHosts.has(String(host || '').toLowerCase().replace(/:\d+$/, ''));
+// Routes that can reach a paid model or search provider.
+const modelRoutes = new Set(['/api/chat', '/api/facts', '/api/plans', '/api/plans/revise']);
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 async function body(req, max = 24000) {
   let content = ''; for await (const chunk of req) { content += chunk; if (content.length > max) throw new AppError('Request too large.', 413); }
@@ -33,11 +44,14 @@ const MAX_STREAMS_PER_USER = 6; // the four-phone demo opens one per account; th
 
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {
   const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), mediaLimit = rateLimiter(60, 60_000), avatarLimit = rateLimiter(10, 60_000), streams = new Map();
+  const failedByAccount = limiter(10, 15 * 60_000), modelCalls = limiter(20, 60_000), writes = limiter(120, 60_000);
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org https://*.googleusercontent.com; connect-src 'self'; frame-src 'self' about: https://www.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
     try {
+      assert(hostAllowed(req.headers.host), 'Unrecognized host.', 421);
+      const url = new URL(req.url, `http://${req.headers.host}`);
       if (!url.pathname.startsWith('/api/')) {
         assert(req.method === 'GET' || req.method === 'HEAD', 'Method not allowed.', 405);
         const route = url.pathname === '/' ? '/index.html' : url.pathname === '/demo' ? '/demo.html' : url.pathname;
@@ -47,7 +61,7 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         try { assert((await stat(file)).isFile(), 'Not found.', 404); const data = await readFile(file); res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return; } catch { throw new AppError('Not found.', 404); }
       }
       if (req.method !== 'GET' && req.headers.origin) assert(req.headers.origin === `http://${req.headers.host}` || req.headers.origin === `https://${req.headers.host}`, 'Cross-origin request rejected.', 403);
-      if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus() });
+      if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus(), defaultPassword: store.defaultPassword });
       // Public so the login screen can show faces before sign-in. Only stored, signature-checked images are served.
       if (url.pathname === '/api/avatar' && req.method === 'GET') {
         const avatar = store.avatar(url.searchParams.get('id')); assert(avatar, 'Not found.', 404);
@@ -57,7 +71,11 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       if (url.pathname === '/api/login' && req.method === 'POST') {
         assert(loginLimit(req.socket.remoteAddress), 'Too many login attempts. Try again in a minute.', 429);
         const input = await body(req); assert(typeof input.username === 'string' && typeof input.password === 'string', 'Enter your username and password.');
-        const session = store.login(input.username, input.password); assert(session, 'That username or password is incorrect.', 401); return json(res, 200, session);
+        const account = input.username.toLowerCase().trim();
+        assert(!failedByAccount.blocked(account), 'This account is temporarily locked after repeated failed logins. Try again in 15 minutes.', 429);
+        const session = store.login(input.username, input.password);
+        if (!session) failedByAccount.hit(account);
+        assert(session, 'That username or password is incorrect.', 401); return json(res, 200, session);
       }
       const token = req.headers.authorization?.replace(/^Bearer /, ''); const user = store.authenticate(token); assert(user, 'Please log in again.', 401); const id = user.id;
       if (url.pathname === '/api/events' && req.method === 'GET') {
@@ -67,6 +85,10 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         const listener = revision => res.write(`data: ${JSON.stringify({ revision })}\n\n`); store.listeners.add(listener); listener(store.data.revision);
         const heartbeat = setInterval(() => { if (!store.authenticate(token)) res.end(); else res.write(': keepalive\n\n'); }, 15000);
         res.on('close', () => { clearInterval(heartbeat); store.listeners.delete(listener); }); return;
+      }
+      if (req.method === 'POST') {
+        assert(writes.hit(id), 'You’re going a little fast. Try again in a minute.', 429);
+        assert(!modelRoutes.has(url.pathname) || modelCalls.hit(id), 'Your agent needs a short break. Try again in a minute.', 429);
       }
       if (req.method === 'GET') {
         if (url.pathname === '/api/state') {
@@ -109,7 +131,7 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/matches/dismiss': result = engine.dismissMatch(id, clean(input.placeId, 80)); break;
         case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true, input.decline === true); break;
         case '/api/facts': {
-          assert(store.data.places[input.placeId], 'Place not found.', 404);
+          assert(Object.hasOwn(store.data.places, String(input.placeId)), 'Place not found.', 404);
           // Each lookup can be a paid search-grounding call.
           assert(factsLimit(id), 'Too many detail checks. Try again in a minute.', 429);
           // Date and time reach the search prompt and the shared cache key, so only real values get through.
