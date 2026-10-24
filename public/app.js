@@ -3,12 +3,13 @@ import { qrSvg } from './qr.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const slot = new URLSearchParams(location.search).get('slot') || 'single';
+const inviteParam = new URLSearchParams(location.search).get('invite');
 const tokenKey = `disco-session-${slot}`;
 const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
 let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', lastChatLen = -1, searchTimer;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
-const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set() };
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
 
 /* ---------- Icons (drawn from the mockup boards) ---------- */
 const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
@@ -79,7 +80,7 @@ function typeTag(p) {
 }
 const tagPill = p => { const [label, bg] = typeTag(p); return `<span class="typetag" style="background:${bg}">${esc(label)}</span>`; };
 const price = p => p?.price == null ? '' : p.price < 15 ? '$' : p.price < 30 ? '$$' : '$$$';
-const distance = p => Number.isFinite(p?.distance) ? `${(p.distance * 0.621371).toFixed(1)} mi from OSU` : '';
+const distance = p => Number.isFinite(p?.distance) ? `${(p.distance * 0.621371).toFixed(1)} mi from ${p.distanceSource === 'your location' ? 'you' : 'OSU'}` : '';
 const GAPS = [[/^Date/, 'good for a date'], [/^Quiet/, 'quiet'], [/^Opening hours/, 'hours'], [/^Closed/, 'open then'], [/^Current menu prices/, 'prices'], [/^Above your/, 'under your price'], [/^Distance uses/, ''], [/^(\w+) not confirmed/, m => m[1].toLowerCase()]];
 const shortGap = text => { for (const [re, out] of GAPS) { const m = text.match(re); if (m) return typeof out === 'function' ? out(m) : out; } return text; };
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -157,7 +158,7 @@ async function api(path, data) {
 function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 4200); }
 async function refresh() {
   if (!token) return;
-  try { S = await api('/state'); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
+  try { const query = ui.location ? `?lat=${encodeURIComponent(ui.location.lat)}&lon=${encodeURIComponent(ui.location.lon)}` : ''; S = await api('/state' + query); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
 }
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 100); }
 async function live() {
@@ -175,7 +176,9 @@ async function live() {
 }
 function logoutLocal() { token = null; S = null; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
 async function login(username, password) {
-  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh(); live();
+  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh();
+  if (inviteParam) { try { const preview = await api('/invite?from=' + encodeURIComponent(inviteParam)); stack.push({ name: 'invite-preview', id: inviteParam, data: preview }); } catch (error) { toast(error.message); } }
+  live();
   if (parent !== window) parent.postMessage({ kind: 'disco-ready', user: result.user.id }, location.origin);
 }
 
@@ -191,6 +194,7 @@ async function load() {
   const r = cur();
   try {
     if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data, r.rating); }
+    else if (r.name === 'friend-profile' && !r.data) r.data = await api('/profile?id=' + encodeURIComponent(r.id));
     else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
     else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
     else if (r.name === 'facts' && r.placeId && !r.data) r.data = await api('/facts', { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
@@ -203,9 +207,11 @@ async function load() {
 function tabbar(active) {
   return `<nav class="tabbar" aria-label="Main">${[['chat', 'Chat'], ['feed', 'Feed'], ['adventures', 'Adventures'], ['you', 'You']].map(([v, l]) => `<button class="tab ${active === v ? 'active' : ''}" data-action="tab" data-view="${v}" ${active === v ? 'aria-current="page"' : ''}>${l}${v === 'adventures' && needsMe() ? '<i class="dot" aria-hidden="true"></i><span class="sr-only"> (needs you)</span>' : ''}</button>`).join('')}</nav>`;
 }
+function notificationUnread() { return (S.notifications || []).filter(n => !ui.readNotifications.has(n.unreadKey)).length; }
+function notificationButton() { const n = notificationUnread(); return `<button class="icon-circle" data-action="notifications" aria-label="Notifications${n ? `, ${n} unread` : ''}">${n ? `<span class="notif-dot">${n > 9 ? '9+' : n}</span>` : '·'}</button>`; }
 const rootTab = () => stack[0].name;
 function brandbar(right) {
-  return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button>${right}</header>`;
+  return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button><div class="header-actions">${notificationButton()}${right || ''}</div></header>`;
 }
 function titlebar(title, { back: showBack = stack.length > 1, close = false, sub = '', subMuted = false, right = '', cls = '', size = '' } = {}) {
   const nav = close ? `<button class="back" data-action="back" aria-label="Close">${I.close}</button>` : showBack ? `<button class="back" data-action="back" aria-label="Back">${I.back}</button>` : '';
@@ -294,6 +300,9 @@ function screen(r) {
     case 'catalog': return catalogScreen(r);
     case 'additem': return addItemScreen();
     case 'friends': return friendsScreen();
+    case 'friend-profile': return friendProfileScreen(r);
+    case 'notifications': return notificationsScreen();
+    case 'invite-preview': return invitePreviewScreen(r);
     case 'addfriends': return addFriendsScreen(r);
     case 'settings': return settingsScreen();
     case 'facts': return factsScreen(r);
@@ -320,6 +329,7 @@ function chatScreen() {
   const ideas = [`matcha near me, open saturdays, good for a first date`, friends.length ? `plan something saturday night with ${friends.map(f => f.name.split(' ')[0].toLowerCase()).join(' and ')}. something fun, not too pricey` : '', 'what do you remember about me?'].filter(Boolean);
   let body = '<div style="margin-top:auto"></div>';
   if (!S.chat.length) body += `<p class="agent-text">Hey ${first(S.me)}. Ask for a spot your friends vouch for, or tell me who you want to plan with. Nothing goes out until you say go.</p><div class="suggestions">${ideas.map(t => `<button class="label-pill" data-action="prompt" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+  if (ui.locationStatus !== 'live') body += `<p class="meta location-note">Near me uses the OSU demo location until you allow location. <button class="link" data-action="location">Use my location</button></p>`;
   body += S.chat.map((m, i) => message(m, latest[m.planId] === i)).join('');
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
   body += S.matches.map(matchCard).join('');
@@ -396,6 +406,18 @@ function feedScreen() {
 // Review cards are for photos the reviewer uploads. Uploads aren't stored yet, so they keep the plain placeholder
 // (no map, no Google photo) until that exists; swap this helper's body when they are.
 const reviewPhoto = (p, style = '', cls = '') => `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"><span>${initials(p.name)}</span></button>`;
+function notificationsScreen() {
+  const list = S.notifications || [];
+  return `${titlebar('Notifications', { size: 't30', right: list.length ? '<button class="pill" data-action="notifications-read">Mark all read</button>' : '' })}<main class="content gap-8" data-scroll>
+    ${list.map(n => `<button class="card row-pad row gap-10 ${ui.readNotifications.has(n.unreadKey) ? '' : 'sh-4'}" style="text-align:left" data-action="notification" data-id="${esc(n.id)}"><span class="grow stack"><span class="body-15 strong">${esc(n.title)}</span><span class="body-14">${esc(n.body)}</span><span class="meta-12">${esc(ago(n.at))}</span></span>${ui.readNotifications.has(n.unreadKey) ? '' : '<span class="dot" aria-label="Unread"></span>'}</button>`).join('') || '<div class="card empty-card"><p class="h-19">You’re all caught up</p><p class="meta">Invitations, friend activity, and plan updates will appear here.</p></div>'}
+  </main>`;
+}
+function invitePreviewScreen(r) {
+  const p = r.data;
+  if (!p?.inviter) return `${titlebar('Invite unavailable')}<main class="content" data-scroll><div class="card empty-card"><p class="h-19">That invite link is no longer available.</p><p class="meta">Ask your friend to send a fresh Disco link.</p></div></main>`;
+  const action = p.status === 'available' ? `<button class="btn primary lg" data-action="invite-add" data-id="${esc(p.inviter.id)}">Add ${first(p.inviter)} on Disco</button>` : `<p class="meta center">${p.status === 'friends' ? 'You’re already friends.' : p.status === 'pending' ? 'Friend request already pending.' : 'That is your own invite link.'}</p>`;
+  return `${titlebar('You’ve been invited', { close: true, cls: 'inline', size: 't24' })}<main class="content gap-16" data-scroll><section class="card purple pad col gap-12"><div class="row gap-12">${av(p.inviter, 60)}<div><h1 class="h-24">${esc(p.inviter.name)}</h1><p class="body-14">wants to connect with you on Disco</p></div></div>${p.inviter.fictional ? '<p class="meta">Demo account</p>' : ''}</section>${action}</main>`;
+}
 function feedCard(r) {
   const p = r.place, media = ['Music', 'Movies & TV', 'Books', 'Products'].includes(p.category), saved = S.me.saved.includes(p.id), liked = r.likes.includes(S.me.id), open = ui.comments.has(r.id);
   const body = media ? `<div class="row gap-12">${reviewPhoto(p, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${reviewPhoto(p, 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
@@ -469,9 +491,14 @@ function addItemScreen() {
 }
 
 /* 10 · Profile */
-const CATS = ['Eat & Drink', 'Live Events', 'Music', 'Movies & TV', 'Products'];
+const CATS = ['Eat & Drink', 'Places', 'Live Events', 'Music', 'Movies & TV', 'Books', 'Products'];
 function profileScreen() {
-  const been = S.myReviews.map(r => ({ p: r.place, rating: r.rating })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
+  /* Legacy profile renderer kept here temporarily while the category view rolls out.
+  const profileBeen = S.myReviews.map(review => ({ p: review.place, rating: review.rating, review })).filter(x => x.p), profileWant = S.savedPlaces.map(p => ({ p }));
+  const profileList = (items, label) => `<section class="stack gap-8"><h2 class="eyebrow">${label}</h2>${items.filter(x => group(x.p) === ui.pcat).slice(0, 20).map(x => `<li class="card row-pad row gap-8"><button class="row gap-12 grow" style="text-align:left" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="body-15 strong">${esc(x.p.name)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button>${x.review ? `<button class="pill h36" data-action="edit-review" data-id="${esc(x.p.id)}">Edit</button><button class="pill h36" data-action="delete-review" data-id="${esc(x.review.id)}">Delete</button>` : ''}</li>`).join('') || '<p class="meta">Nothing here yet.</p>'}</section>`;
+  return `${titlebar('Your profile', { back: false, size: 't30', right: `<button class="icon-circle gear" data-action="settings" aria-label="Settings and privacy">${I.gear}</button>` })}<main class="content gap-16" data-scroll><section class="card purple pad col gap-10"><div class="row gap-14">${av(S.me, 56)}<div><h1 class="h-24">${esc(S.me.name)}</h1><p class="body-14">${esc([S.me.area, S.me.fictional ? 'demo person' : ''].filter(Boolean).join(' · '))}</p></div></div><p class="meta">${profileBeen.length} Been · ${profileWant.length} Want to try · ${S.friends.length} Friends · ${S.plans.length} Adventures</p></section><div class="seg" role="tablist" aria-label="Your places"><button role="tab" aria-selected="${ui.ptab === 'been'}" data-action="ptab" data-value="been">Been</button><button role="tab" aria-selected="${ui.ptab === 'want'}" data-action="ptab" data-value="want">Want to try</button></div>${ui.ptab === 'been' ? profileList(profileBeen, 'Your ratings') : profileList(profileWant, 'Saved in')}<p class="meta-12 center">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> · Photos and maps © Google</p></main>${tabbar('you')}`;
+  */
+  const been = S.myReviews.map(review => ({ p: review.place, rating: review.rating, review })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
   const extra = [...new Set([...been, ...want].map(x => group(x.p)))].filter(g => !CATS.includes(g));
   const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const interests = String(S.me.private.interests || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
@@ -486,7 +513,11 @@ function profileScreen() {
     ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
       || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul>
     <p class="meta-12 center" style="margin-top:24px">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Photos and maps © Google</p></main>${tabbar('you')}`;
+  }
+    /* ${items.map(x => `<li class="card row-pad row gap-8"><button class="row gap-12 grow" style="text-align:left" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button>${x.review ? `<button class="pill h36" data-action="edit-review" data-id="${esc(x.p.id)}" aria-label="Edit review for ${esc(x.p.name)}">Edit</button><button class="pill h36" data-action="delete-review" data-id="${esc(x.review.id)}" aria-label="Delete review for ${esc(x.p.name)}">Delete</button>` : ''}</li>`).join('')
+      || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul></main>${tabbar('you')}`;
 }
+*/
 function settingsScreen() {
   const p = S.me.private;
   return `${titlebar('Settings', { size: 't30' })}<main class="content gap-16" data-scroll>
@@ -673,8 +704,20 @@ function friendsScreen() {
   <main class="content" data-scroll>
     ${S.requests.length ? `<section class="card pad sh-4 col gap-10"><h2 class="eyebrow">Requests</h2>${sticker(`${S.requests.length} new`, 'coral')}${S.requests.map(r => `<div class="row gap-10">${av(r.fromUser, 38)}<span class="grow stack"><span class="body-15 strong">${esc(r.fromUser.name)}</span><span class="meta-12">${r.mutual.length ? `Friends with ${esc(names(r.mutual))}` : 'Wants to be friends'}</span></span><button class="pill primary h36" data-action="friend-accept" data-id="${esc(r.from)}">Accept</button><button class="icon-circle" style="width:36px;height:36px" data-action="friend-decline" data-id="${esc(r.from)}" aria-label="Decline ${esc(r.fromUser.name)}">${I.x}</button></div>`).join('')}</section>` : ''}
     <div class="search">${I.search('#5E5873')}<label class="sr-only" for="friend-q">Search your friends</label><input id="friend-q" placeholder="Search your friends" autocomplete="off" value="${esc(drafts['friend-q'] || '')}"></div>
-    <ul class="stack gap-8" aria-label="Your friends">${list.map(u => `<li class="card row-pad row gap-10">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.ratings} rating${u.ratings === 1 ? '' : 's'} · ${u.adventures} adventure${u.adventures === 1 ? '' : 's'} together${u.fictional ? ' · demo person' : ''}</span></span>${MAIN_IDS.includes(u.id) ? `<button class="pill" data-action="plan-friend" data-id="${esc(u.id)}">Plan</button>` : ''}</li>`).join('') || '<li class="meta">No friends match that.</li>'}</ul>
+    <ul class="stack gap-8" aria-label="Your friends">${list.map(u => `<li class="card row-pad row gap-10"><button class="row gap-10 grow" style="text-align:left" data-action="friend-profile" data-id="${esc(u.id)}">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.ratings} rating${u.ratings === 1 ? '' : 's'} · ${u.adventures} adventure${u.adventures === 1 ? '' : 's'} together${u.fictional ? ' · demo person' : ''}</span></span></button>${MAIN_IDS.includes(u.id) ? `<button class="pill" data-action="plan-friend" data-id="${esc(u.id)}">Plan</button>` : ''}</li>`).join('') || '<li class="meta">No friends match that.</li>'}</ul>
   </main>${tabbar(rootTab())}`;
+}
+
+function friendProfileScreen(r) {
+  const p = r.data;
+  if (!p) return `${titlebar('Friend profile')}<main class="content" data-scroll><p class="meta">Loading…</p></main>`;
+  const reviewRows = p.reviews.map(rv => `<article class="card pad row top gap-10">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${esc(rv.place?.name || 'Place')}</span>${score(rv.rating)}</p><p class="quote q-22">“${esc(rv.quote)}”</p><p class="meta-12">${rv.synthetic ? 'Demo opinion' : ago(rv.date)}</p></div></article>`).join('');
+  const list = (items, label) => `<section class="stack gap-8"><h2 class="eyebrow">${label}</h2>${items.slice(0, 12).map(place => `<button class="card row-pad row" style="text-align:left" data-action="place" data-id="${esc(place.id)}"><span class="grow"><span class="body-15 strong">${esc(place.name)}</span><span class="meta-12">${esc(place.area || '')}</span></span>${tagPill(place)}</button>`).join('') || '<p class="meta">Nothing here yet.</p>'}</section>`;
+  return `${titlebar(esc(p.user.name), { sub: [p.user.area, p.user.fictional ? 'demo person' : ''].filter(Boolean).join(' · ') })}<main class="content gap-16" data-scroll>
+    <section class="card purple pad col gap-10"><div class="row gap-12">${av(p.user, 56)}<div><h2 class="h-21">${esc(p.user.name)}</h2><p class="meta">${p.stats.been} Been · ${p.stats.wantToTry} Want to try · ${p.stats.friends} Friends</p></div></div><button class="btn primary h44" data-action="plan-friend" data-id="${esc(p.user.id)}">Plan something together</button></section>
+    ${list(p.been, 'Been')}${list(p.wantToTry, 'Want to try')}
+    <section class="stack gap-8"><h2 class="eyebrow">Reviews</h2>${reviewRows || '<p class="meta">No visible reviews yet.</p>'}</section>
+  </main>`;
 }
 
 /* 14 · Add friends */
@@ -781,8 +824,14 @@ function render() {
 
 /* ---------- Actions ---------- */
 async function sendChat(text, planId) {
+  if (!planId && /\bnear me\b/i.test(text)) await ensureLocation();
   pending = true; render();
   try { await api('/chat', { text, planId }); delete drafts.message; await refresh(); } finally { pending = false; render(); }
+}
+async function ensureLocation() {
+  if (ui.location || ui.locationStatus === 'denied') return;
+  if (!navigator.geolocation) { ui.locationStatus = 'denied'; return; }
+  await new Promise(resolve => navigator.geolocation.getCurrentPosition(position => { ui.location = { lat: position.coords.latitude, lon: position.coords.longitude }; ui.locationStatus = 'live'; resolve(); }, () => { ui.location = null; ui.locationStatus = 'denied'; resolve(); }, { enableHighAccuracy: false, maximumAge: 300000, timeout: 5000 }));
 }
 async function createPlan(body) { const { planId } = await api('/plans', body); await refresh(); replaceOrGo('working', { id: planId }); }
 function replaceOrGo(name, params) { if (['newplan', 'change'].includes(cur().name)) replace(name, params); else go(name, params); }
@@ -828,10 +877,18 @@ document.addEventListener('click', async event => {
       case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
       case 'post-review': {
         const st = ui.logs[id], quote = String(drafts.note || '').trim(); if (quote.length < 3) { toast('Add a short note for friends first.'); $('#note')?.focus(); break; }
-        el.disabled = true; await api('/reviews', { placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
+        el.disabled = true; await api('/reviews', { reviewId: cur().reviewId, placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
         delete drafts.note; delete ui.logs[id]; await refresh(); back(); toast('Posted. Your friends’ picks just updated.'); break;
       }
+      case 'edit-review': { const review = S.myReviews.find(r => r.placeId === id); if (review) go('log', { id, reviewId: review.id }); break; }
+      case 'delete-review': if (confirm('Delete this review?')) { await api('/reviews/delete', { reviewId: id }); await refresh(); toast('Review deleted.'); } break;
       case 'friends': go('friends'); break;
+      case 'friend-profile': go('friend-profile', { id }); break;
+      case 'notifications': go('notifications'); break;
+      case 'notifications-read': for (const n of S.notifications || []) ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); render(); break;
+      case 'notification': { const n = S.notifications.find(x => x.id === id); if (!n) break; ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); if (n.href?.startsWith('plan:')) openPlan(n.href.slice(5)); else if (n.href?.startsWith('place:')) go('place', { id: n.href.slice(6) }); else if (n.href === 'friends') go('friends'); else if (n.href === 'feed') tab('feed'); break; }
+      case 'invite-add': { await api('/friends', { userId: id }); await refresh(); replace('friends'); toast('Friend request sent.'); break; }
+      case 'location': ui.locationStatus = 'fallback'; ui.location = null; await ensureLocation(); await refresh(); toast(ui.location ? 'Using your location for near-me picks.' : 'Using the OSU demo location.'); break;
       case 'addfriends': go('addfriends'); break;
       case 'settings': go('settings'); break;
       case 'newplan': { const draft = S.chat.find(m => m.id === el.dataset.draft)?.draft; go('newplan', { draft, placeId: el.dataset.place }); break; }
