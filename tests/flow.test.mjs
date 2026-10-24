@@ -764,3 +764,20 @@ test('review photos: owner-only upload, signed URLs friends receive, kept on edi
   assert.equal((await fetch(base + photo.replace(/&sig=[^&]+/, ''))).status, 404, 'no signature, no photo');
   engine.setReviewPhoto('ricky', { reviewId: review.id, remove: true }); assert.equal((await fetch(base + photo)).status, 404, 'removed photos stop serving');
 });
+
+test('stuck-plan suggestions are tailored: each one passes every friend\'s private constraints, and tapping one resolves it', async () => {
+  const { store, engine } = setup(); // seed: Ricky and Daniel are only free on weekends
+  const monday = [...Array(7).keys()].map(i => { const d = new Date(`${nextSaturday()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 2 + i * 7); return d.toISOString().slice(0, 10); })[0];
+  const { planId } = engine.createPlan('ricky', { friends: ['daniel'], query: 'pizza', date: monday, time: '19:00', allowance: 24 }); await engine.jobs.get(planId);
+  const p = engine.d.plans.find(x => x.id === planId); assert.equal(p.state, 'needs_decision', 'nobody is free on Monday');
+  const suggestions = engine.stuckSuggestions(p); assert.ok(suggestions.length, 'there is something that works');
+  assert.ok(!suggestions.some(x => /Monday|Tuesday|Wednesday|Thursday|Friday/.test(x.text)), 'no weekday suggestions for weekend-only friends');
+  for (const x of suggestions) {
+    const o = { ...p.option, ...x.option, place: x.option.placeId ? store.data.places[x.option.placeId] : p.option.place };
+    for (const who of p.participants) assert.equal(engine.check(who, p, o, null).type, 'accept', `"${x.text}" must work for ${who}`);
+  }
+  assert.deepEqual(engine.state('ricky').plans.find(x => x.id === planId).suggestions, suggestions.map(x => x.text), 'the host sees them');
+  assert.deepEqual(engine.state('daniel').plans.find(x => x.id === planId)?.suggestions || [], [], 'only the host does');
+  await engine.chat('ricky', { text: suggestions[0].text, planId }); await engine.jobs.get(planId);
+  assert.equal(p.state, 'awaiting_approval', `tapping "${suggestions[0].text}" resolves it`); store.close();
+});

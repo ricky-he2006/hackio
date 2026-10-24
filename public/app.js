@@ -386,7 +386,9 @@ function threadScreen(r) {
   const p = findPlan(t.id), waiting = p?.isHost && p.state === 'awaiting_approval', invitees = (p?.participants || []).filter(u => !isMe(u)).length;
   const nudge = waiting ? `<div class="card pad-14 sh-4 col gap-8" role="status"><p class="eyebrow">Waiting for your OK</p><p class="body-14">${invitees === 1 ? 'Your friend can’t' : `Your ${invitees} friends can’t`} see this adventure until you approve it. Nothing goes out until you say go.</p><button class="btn primary h48" style="align-self:flex-start" data-action="approve-open" data-id="${esc(t.id)}">Review &amp; send invites</button></div>` : '';
   // A stuck adventure (no option fit everyone) offers one-tap changes; each reads like something the host could type.
-  const stuck = p?.isHost && p.state === 'needs_decision' ? `<div class="suggestions" aria-label="Try a change">${stuckReplies(p).map(text => `<button class="label-pill" data-action="thread-prompt" data-text="${esc(text)}" ${pending ? 'disabled' : ''}>${esc(text)}</button>`).join('')}</div>` : '';
+  // Suggestions come from the server, checked against everyone's private constraints; generic ones only when none fit.
+  const tailored = p?.suggestions?.length, replies = p ? (tailored ? p.suggestions : stuckReplies(p)) : [];
+  const stuck = p?.isHost && p.state === 'needs_decision' ? `${tailored ? '<p class="meta-12">These would work for everyone:</p>' : '<p class="meta-12">Nothing in the next two weeks fits everyone as is. Try one of these, or change who’s coming.</p>'}<div class="suggestions" aria-label="Try a change">${replies.map(text => `<button class="label-pill" data-action="thread-prompt" data-text="${esc(text)}" ${pending ? 'disabled' : ''}>${esc(text)}</button>`).join('')}</div>` : '';
   // At the end, because chats open scrolled to the newest message.
   let body = '<div style="margin-top:auto"></div>' + t.messages.map((m, i) => message(m, latest[m.planId] === i, i === t.messages.length - 1)).join('') + nudge + stuck;
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
