@@ -167,6 +167,11 @@ test('a model preference moves the plan to another venue that still passes exact
   try {
     const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.ok(first); assert.notEqual(p.option.place.name, first);
     for (const id of p.participants) assert.equal(evaluatePrivate(engine.context(id, p), p.option, p.facts).type, 'accept');
+    // Once invites went out, a time change keeps the approved venue even if a model would still prefer another.
+    const venue = p.option.place.id; let asked = 0; engine.model = async (_s, _input, label) => label === 'evaluator' ? (asked++, { verdict: 'prefer_another' }) : null;
+    engine.approve('ricky', p.id, p.revision); for (const id of MAIN_IDS.filter(x => x !== 'ricky')) engine.rsvp(id, p.id, 'in');
+    await engine.chat('arnav', { text: "Can't do 8:30, could do 9", planId: p.id }); await engine.jobs.get(p.id);
+    assert.equal(p.state, 'awaiting_approval'); assert.equal(p.option.time, '21:00'); assert.equal(p.option.place.id, venue); assert.ok(asked > 0);
   } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
 
