@@ -163,7 +163,19 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 .photo.thumb{width:52px;height:52px;border-radius:8px}
 .photo.thumb span,.photo.t72 span{font-size:20px}
 .photo.t72{width:72px;height:72px;border-radius:12px}
+/* Map snippet inside .photo (see mapSnip in app.js): tiles are placed absolutely around the centred pin. */
+.photo{position:relative}
+.photo .map-snip{position:absolute;inset:0;opacity:1;font-size:0;background:var(--lav-2)}
+.map-snip img{position:absolute;width:256px;height:256px;max-width:none;filter:saturate(.75)}
+.map-snip .pin{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--coral);border:2px solid var(--ink);box-shadow:0 0 0 3px rgba(255,255,255,.85)}
+.map-snip .osm-attr{position:absolute;right:4px;bottom:3px;font:600 9px/1.3 var(--body);color:var(--muted-2);background:rgba(255,253,247,.85);padding:0 4px;border-radius:4px}
+.photo.thumb .osm-attr,.photo.cover .osm-attr,.photo.t72 .osm-attr,.photo.thumb .photo-attr,.photo.cover .photo-attr,.photo.t72 .photo-attr{display:none}
+.photo .place-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.photo-attr{position:absolute;left:4px;bottom:3px;font:600 9px/1.3 var(--body);color:var(--muted-2);background:rgba(255,253,247,.85);padding:0 4px;border-radius:4px;opacity:1}
+.place-map{display:block;width:100%;height:200px;border:2px solid var(--ink);border-radius:14px;background:var(--lav-2)}
 .hero{position:relative;height:196px;flex-shrink:0;background:var(--lav-2);border-bottom:2px solid var(--ink);display:flex;align-items:center;justify-content:center}
+.hero{overflow:hidden}
+.hero .hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .hero span{font-family:var(--display);font-weight:800;font-size:56px;opacity:.22}
 .hero .icon-circle{position:absolute;top:16px;left:16px}
 

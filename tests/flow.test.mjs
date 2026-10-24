@@ -424,3 +424,35 @@ test('recommendation constraints come from the user\'s words, not ones a model a
     assert.ok(engine.recommend('ricky', last.query).every(p => !p.unmatched.some(u => /^Quiet/.test(u))));
   } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
+
+test('place pages link to Google Maps by address or exact coordinates, and embed only when a key is configured', () => {
+  const { store, engine } = setup(), saved = process.env.GOOGLE_MAPS_EMBED_KEY;
+  try {
+    const withAddress = Object.values(store.data.places).find(p => p.address), coordsOnly = Object.values(store.data.places).find(p => !p.address && Number.isFinite(p.lat) && p.lat);
+    delete process.env.GOOGLE_MAPS_EMBED_KEY;
+    const a = engine.place('ricky', withAddress.id); assert.equal(a.mapEmbed, null);
+    assert.equal(new URL(a.mapsLink).searchParams.get('query'), `${withAddress.name}, ${withAddress.address}`);
+    assert.equal(new URL(engine.place('ricky', coordsOnly.id).mapsLink).searchParams.get('query'), `${coordsOnly.lat},${coordsOnly.lon}`);
+    process.env.GOOGLE_MAPS_EMBED_KEY = 'test-browser-key';
+    const embed = new URL(engine.place('ricky', withAddress.id).mapEmbed);
+    assert.equal(embed.origin + embed.pathname, 'https://www.google.com/maps/embed/v1/place'); assert.equal(embed.searchParams.get('key'), 'test-browser-key');
+    assert.equal(engine.place('ricky', engine.addItem('ricky', { name: 'My secret spot', category: 'Places' }).id).mapEmbed, null, 'user-added items get no embed');
+  } finally { if (saved === undefined) delete process.env.GOOGLE_MAPS_EMBED_KEY; else process.env.GOOGLE_MAPS_EMBED_KEY = saved; store.close(); }
+});
+
+test('place media stores only Google place IDs, reuses them, and skips user-added items or a missing key', async () => {
+  const saved = process.env.GOOGLE_PLACES_KEY, calls = [];
+  const store = new Store({ path: ':memory:' });
+  const engine = new Engine(store, { delay: 0, lookup: async (p, knownId) => { calls.push(knownId ?? null); return p.name === 'No Match' ? null : { id: 'gid-1', address: '1 High St, Columbus, OH', photo: 'https://lh3.googleusercontent.com/p/1', attribution: 'A. Photographer' }; } });
+  try {
+    const venue = Object.keys(store.data.places)[0];
+    delete process.env.GOOGLE_PLACES_KEY; assert.equal((await engine.placeMedia(venue)).photo, null); assert.equal(calls.length, 0);
+    process.env.GOOGLE_PLACES_KEY = 'test-server-key';
+    assert.deepEqual(await engine.placeMedia(venue), { photo: 'https://lh3.googleusercontent.com/p/1', address: '1 High St, Columbus, OH', attribution: 'A. Photographer' });
+    assert.deepEqual(store.data.googleIds, { [venue]: 'gid-1' }, 'only the place ID is kept');
+    await engine.placeMedia(venue); assert.deepEqual(calls, [null, 'gid-1'], 'second lookup reuses the stored ID');
+    const missing = engine.addItem('ricky', { name: 'No Match', category: 'Places' }); store.data.places[missing.id].provenance = 'Workbook venue';
+    await engine.placeMedia(missing.id); await engine.placeMedia(missing.id); assert.equal(calls.length, 3, 'a venue with no match is not searched again');
+    const userItem = engine.addItem('ricky', { name: 'My spot', category: 'Places' }); await engine.placeMedia(userItem.id); assert.equal(calls.length, 3, 'user-added items never reach Google');
+  } finally { if (saved === undefined) delete process.env.GOOGLE_PLACES_KEY; else process.env.GOOGLE_PLACES_KEY = saved; store.close(); }
+});
