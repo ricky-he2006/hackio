@@ -128,7 +128,7 @@ function status(p) {
   if (p.state === 'cancelled') return { key: 'cancelled', label: 'Cancelled', cls: 'gray', bg: '#E4E1DA' };
   if (['confirmed', 'booked'].includes(p.state)) return { key: 'confirmed', label: 'Confirmed', cls: 'green', bg: '#79D18A' };
   if (p.isHost && ['awaiting_approval', 'needs_decision'].includes(p.state)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
-  if (!p.isHost && p.state === 'invited' && ['pending', 'reconfirm'].includes(p.myRsvp)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
+  if (!p.isHost && ['invited', 'needs_decision'].includes(p.state) && ['pending', 'reconfirm'].includes(p.myRsvp)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
   return { key: 'working', label: 'Working it out', cls: 'yellow', bg: '#FFD666' };
 }
 function statusLine(p) {
@@ -138,8 +138,8 @@ function statusLine(p) {
   if (p.state === 'confirmed') return 'Everyone’s in';
   if (p.isHost && p.state === 'awaiting_approval') return p.hasPendingChange && p.changeBy && p.changeBy.id !== S.me.id ? `${firstRaw(p.changeBy)} asked for ${t12(p.option.time, false)}` : 'Ready for your OK';
   if (p.isHost && p.state === 'needs_decision') return 'Needs a new plan';
-  if (!p.isHost && p.state === 'invited' && p.myRsvp === 'reconfirm') return 'Reconfirm the new time';
-  if (!p.isHost && p.state === 'invited' && p.myRsvp === 'pending') return 'Your reply needed';
+  if (!p.isHost && ['invited', 'needs_decision'].includes(p.state) && p.myRsvp === 'reconfirm') return 'Reconfirm the new time';
+  if (!p.isHost && ['invited', 'needs_decision'].includes(p.state) && p.myRsvp === 'pending') return 'Your reply needed';
   if (p.state === 'invited') return `${replied} of ${others.length} replied`;
   return 'Agents are working it out';
 }
@@ -149,7 +149,7 @@ function planRoute(p) {
     if (p.state === 'awaiting_approval') return p.hasPendingChange ? 'changed' : 'approve';
     return 'details';
   }
-  return p.state === 'invited' && ['pending', 'reconfirm'].includes(p.myRsvp) ? 'invite' : 'details';
+  return ['invited', 'needs_decision'].includes(p.state) ? 'invite' : 'details';
 }
 const findPlan = id => S.plans.find(p => p.id === id);
 const needsMe = () => S.plans.some(p => status(p).key === 'ok');
@@ -673,7 +673,7 @@ function workingScreen(p) {
     ${lockNote('Calendars and budgets stay private. Only yes, no or a new time is shared.')}
   </main>
   <footer class="footbar">${stuck ? `<button class="btn primary lg" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn lg fit" data-action="cancel" data-id="${esc(p.id)}">Cancel</button>`
-    : ready ? `<button class="btn primary lg" data-action="approve-open" data-id="${esc(p.id)}">See the route</button>`
+    : ready ? `<button class="btn primary lg" data-action="approve-open" data-id="${esc(p.id)}">See the route</button><button class="btn lg" data-action="cancel" data-id="${esc(p.id)}">Cancel</button>`
     : p.state === 'negotiating' ? `<button class="btn lg shadow" disabled>Still working it out…</button>` : `<button class="btn lg shadow" data-action="details" data-id="${esc(p.id)}">See the route</button>`}</footer>`;
 }
 const SORTED = { schedule: t => `Moved to ${t} so everyone can come`, budget: () => 'Brought the cost down to fit everyone', dietary_unverified: () => 'Checked the food works for everyone', closed: () => 'Picked a time they’re open', preference: () => 'Swapped in a spot the group likes more' };
@@ -696,13 +696,13 @@ function approveScreen(p) {
     <div class="card lav pad-14"><h2 class="body-15 strong">${items.length} things sorted out privately</h2><ul class="stack gap-4" style="margin-top:6px">${items.map(t => `<li class="check">${I.check}${esc(t)}</li>`).join('')}</ul></div>
     ${p.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
     <div class="stack gap-12 mt-auto"><button class="btn primary lg" data-action="approve" data-id="${esc(p.id)}" data-revision="${p.revision}">Send invites</button>
-      <div class="row gap-10"><button class="btn" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn" data-action="another" data-id="${esc(p.id)}">Another route</button></div></div>
+      <div class="row gap-10"><button class="btn" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn" data-action="another" data-id="${esc(p.id)}">Another route</button></div><button class="btn" data-action="cancel" data-id="${esc(p.id)}">Cancel plan</button></div>
   </section></div>`;
 }
 
 /* 5 · Invite (invitee) */
 function inviteScreen(p) {
-  const host = p.participants.find(u => u.id === p.hostId), going = p.participants.filter(u => p.rsvps[u.id] === 'in' && !isMe(u)), why = p.why[0], d = dparts(p.option.date), re = p.myRsvp === 'reconfirm';
+  const host = p.participants.find(u => u.id === p.hostId), going = p.participants.filter(u => p.rsvps[u.id] === 'in' && !isMe(u)), why = p.why[0], d = dparts(p.option.date), re = ['in', 'reconfirm'].includes(p.myRsvp);
   return `<main class="content gap-16" data-scroll style="padding:24px 20px 20px 16px">
     <header class="row gap-10">${stack.length > 1 ? `<button class="back" data-action="back" aria-label="Back" style="margin-left:-10px">${I.back}</button>` : ''}${av(host, 40)}<p class="body-15"><span class="strong">${first(host)}</span> ${re ? 'updated your adventure' : 'invited you on an adventure'}</p></header>
     <article class="card r16 sh-5 col gap-14" style="padding:18px 16px">${sticker('You’re free', 'green lg', 5, 'top:-12px;right:16px;padding:3px 10px')}
@@ -741,13 +741,14 @@ function detailsScreen(p) {
   const d = dparts(p.option.date), st = status(p);
   const changeBanner = p.isHost && p.state === 'awaiting_approval' && p.hasPendingChange ? `<button class="card row gap-10" style="padding:10px 12px" data-action="changed" data-id="${esc(p.id)}">${sticker('Needs your OK', 'coral static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">${p.changeBy && !isMe(p.changeBy) ? `${first(p.changeBy)} moved it to ${t12(p.option.time, false)}` : 'Your change is ready'}</span><span class="link">Review</span></button>`
     : p.state === 'negotiating' ? `<button class="card row gap-10" style="padding:10px 12px" data-action="working" data-id="${esc(p.id)}">${sticker('Working it out', 'yellow static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">Agents are rechecking</span><span class="link">Watch</span></button>`
-    : !p.isHost && st.key === 'ok' ? `<button class="card row gap-10" style="padding:10px 12px" data-action="invite" data-id="${esc(p.id)}">${sticker('Needs your OK', 'coral static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">${p.myRsvp === 'reconfirm' ? 'New time to reconfirm' : 'Reply to the invite'}</span><span class="link">Open</span></button>`
+    : !p.isHost && st.key === 'ok' ? `<div>${sticker('Needs your OK', 'coral static', -3, 'padding:2px 8px')}</div>`
     : p.state === 'needs_decision' ? `<div class="issue">${esc(p.issue || '')}</div>` : '';
   const who = u => { const r = p.rsvps[u.id]; if (p.hasPendingChange && p.changeBy?.id === u.id && !isMe(u)) return `<span class="st orange-ink">Asked for ${t12(p.option.time, false)}</span>`; return r === 'in' ? '<span class="st green-ink">In</span>' : r === 'out' ? '<span class="st orange-ink">Can’t make it</span>' : r === 'reconfirm' ? '<span class="st muted">Reconfirming</span>' : r === 'pending' ? '<span class="st muted">Invited</span>' : '<span class="st muted">Checking</span>'; };
-  const footer = p.isHost && p.state === 'awaiting_approval' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn primary h48" data-action="${p.hasPendingChange ? 'changed' : 'approve-open'}" data-id="${esc(p.id)}">${p.hasPendingChange ? 'Review change' : 'See the route'}</button>`
-    : !p.isHost && st.key === 'ok' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Need a change</button><button class="btn primary h48" data-action="invite" data-id="${esc(p.id)}">Reply</button>`
-    : ['confirmed', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
-    : ['invited', 'needs_decision'].includes(p.state) ? `<button class="btn primary h48" data-action="change" data-id="${esc(p.id)}">Change something</button>` : '';
+  const cancelButton = p.isHost && !['cancelled', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="cancel" data-id="${esc(p.id)}">Cancel plan</button>` : '';
+  const footer = p.isHost && p.state === 'awaiting_approval' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}<button class="btn primary h48" data-action="${p.hasPendingChange ? 'changed' : 'approve-open'}" data-id="${esc(p.id)}">${p.hasPendingChange ? 'Review change' : 'See the route'}</button>`
+    : !p.isHost && st.key === 'ok' ? `<button class="btn h48" data-action="rsvp-out" data-id="${esc(p.id)}">Can’t make it</button><button class="btn primary h48" data-action="rsvp-in" data-id="${esc(p.id)}">${p.myRsvp === 'reconfirm' ? 'Still in' : 'I’m in'}</button>`
+    : ['confirmed', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}<button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
+    : p.isHost && ['invited', 'needs_decision'].includes(p.state) ? `<button class="btn primary h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}` : '';
   const history = [...p.history].reverse().slice(0, 8);
   return `${titlebar(esc(p.title), { size: 't30', sub: `${d.short} · ${t12(p.option.time)} · ~$${esc(p.option.allowance)} each`, right: openChatButton(p) })}
   <main class="content" data-scroll>${changeBanner}
@@ -755,7 +756,7 @@ function detailsScreen(p) {
     <section aria-label="Who’s going"><h2 class="eyebrow" style="margin-bottom:8px">Who’s going</h2><ul class="who stack gap-8">${p.participants.map(u => `<li>${av(u, 30)}<span class="name">${nameOf(u)}</span>${who(u)}</li>`).join('')}</ul></section>
     <section aria-label="History"><h2 class="eyebrow" style="margin-bottom:8px">How it came together</h2><ul class="history stack gap-6">${history.map(h => `<li><span>${new Date(h.at).toLocaleDateString('en-US', { weekday: 'short' })}</span><span>${esc(h.text.replace(/\b([01]\d|2[0-3]):([0-5]\d)\b/g, (_, hh, mm) => t12(`${hh}:${mm}`)))}</span></li>`).join('')}</ul></section>
     ${p.booking ? `<div class="booking"><p class="eyebrow">Demo booking · ${esc(p.booking.reference)}</p><p class="body-14" style="margin-top:4px">${esc(p.booking.note)}</p></div>` : ''}
-    <div class="row wrap gap-8">${p.isHost && p.state === 'confirmed' ? `<button class="pill primary" data-action="book" data-id="${esc(p.id)}">Preview booking</button>` : ''}${['confirmed', 'booked'].includes(p.state) ? `<button class="pill" data-action="calendar" data-id="${esc(p.id)}">Add to calendar</button>` : ''}<button class="pill" data-action="plan-facts" data-id="${esc(p.id)}">Venue details</button>${p.isHost && !['cancelled', 'booked'].includes(p.state) ? `<button class="pill" data-action="cancel" data-id="${esc(p.id)}">Cancel plan</button>` : ''}</div>
+    <div class="row wrap gap-8">${p.isHost && p.state === 'confirmed' ? `<button class="pill primary" data-action="book" data-id="${esc(p.id)}">Preview booking</button>` : ''}${['confirmed', 'booked'].includes(p.state) ? `<button class="pill" data-action="calendar" data-id="${esc(p.id)}">Add to calendar</button>` : ''}<button class="pill" data-action="plan-facts" data-id="${esc(p.id)}">Venue details</button></div>
     ${p.log.length ? `<details class="more" data-key="log-${esc(p.id)}" ${ui.open.has('log-' + p.id) ? 'open' : ''}><summary>${I.chevron} How the agents negotiated</summary>${p.log.map(l => `<p>Round ${l.round}: ${esc(l.userId ? `${nameOf(p.participants.find(u => u.id === l.userId))}’s agent: ` : '')}${esc(l.text)}</p>`).join('')}</details>` : ''}
     <p class="meta-12">${p.mode === 'local' ? 'Local demo agents check real constraints against your proposal.' : `Agent provider: ${esc(p.mode)}`} The cost is a proposed meal allowance, not a menu price.</p>
   </main>${footer ? `<footer class="footbar tight">${footer}</footer>` : ''}${tabbar(rootTab())}`;

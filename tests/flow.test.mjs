@@ -35,6 +35,16 @@ test('full plan: negotiate, approve, invite, RSVP, revise, reconfirm, simulate b
   assert.equal(engine.book('ricky', p.id).simulated, true); assert.equal(p.state, 'booked'); store.close();
 });
 
+test('pending invitees can still respond after another invitee cannot make it', async () => {
+  const { store, engine } = setup(); const p = await start(engine);
+  engine.approve('ricky', p.id, p.revision);
+  engine.rsvp('aditya', p.id, 'out');
+  assert.equal(p.state, 'needs_decision');
+  assert.doesNotThrow(() => engine.rsvp('arnav', p.id, 'in'));
+  assert.equal(p.rsvps.arnav, 'in');
+  store.close();
+});
+
 test('privacy: other contexts, private change text, and unconnected opinions never enter projections', async () => {
   const { store, engine } = setup(); engine.user('arnav').private.preferences = 'PRIVATE_REASON_SENTINEL';
   engine.user('arnav').private.budget = 17.43; const p = await start(engine); engine.approve('ricky', p.id, p.revision);
