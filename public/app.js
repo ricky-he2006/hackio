@@ -79,6 +79,7 @@ function render() {
   $('#nav').innerHTML = ['chat', 'feed', 'adventures', 'you'].map(v => `<button class="nav-item ${view === v ? 'active' : ''}" data-action="nav" data-view="${v}" ${view === v ? 'aria-current="page"' : ''}>${icon(v)}<span>${v === 'you' ? 'You' : v[0].toUpperCase() + v.slice(1)}</span>${v === 'adventures' && S.plans.some(p => p.state === 'invited' && p.myRsvp !== 'in' || p.isHost && p.state === 'awaiting_approval') ? '<i class="notification-dot"></i>' : ''}</button>`).join('');
   $('#main').innerHTML = view === 'chat' ? chatView() : view === 'feed' ? feedView() : view === 'adventures' ? adventuresView() : profileView();
   if (view === 'adventures' && S.matches?.length) $('#main .page-title').insertAdjacentHTML('afterend', sharedMatches());
+  if (view === 'feed') $('#main .filter-row')?.insertAdjacentHTML('beforeend', button('Movies & TV', 'filter', 'chip ' + (filter === 'Movies & TV' ? 'active' : ''), 'data-filter="Movies & TV"'));
   $('#main').scrollTop = scroll;
   if (view === 'chat') {
     if (!$('#chat-form')) $('#composer').innerHTML = `<form id="chat-form" class="composer"><label class="sr-only" for="message">Message your agent</label><textarea id="message" name="message" rows="1" placeholder="Ask your agent anything…" maxlength="2000">${esc(chatDraft)}</textarea><button class="send-button" type="submit" aria-label="Send message">${icon('send')}</button></form><div class="privacy-line">${icon('lock')} Your agent, your private space <span>• ${S.provider.provider === 'local' ? 'Local demo' : esc(S.provider.provider)}</span></div>`;
@@ -161,6 +162,7 @@ function drawModal() {
   if (modal.type === 'tweak') content = modalFrame('Change the proposal', tweakForm());
   if (modal.type === 'add-item') content = modalFrame('Add to your taste', `<form id="item-form" class="stack"><label>Name<input name="name" required maxlength="100" placeholder="A book, album, film, product…"></label><label>Category<select name="category">${['Music', 'Movies & TV', 'Books', 'Products', 'Places'].map(c => `<option>${c}</option>`).join('')}</select></label><button class="btn primary" type="submit">Next: your opinion ${icon('arrow')}</button></form>`);
   $('#modal-root').innerHTML = content;
+  if (modal.type === 'review') $('.modal input[type="range"]')?.setAttribute('aria-label', 'Your rating');
   if (modal.type === 'plan') {
     const primary = $('.modal [data-action="approve"], .modal [data-action="rsvp-in"]');
     if (primary) { const group = primary.dataset.action === 'rsvp-in' ? primary.parentElement : primary; group.classList.add('primary-shortcut'); $('.modal .route-card')?.insertAdjacentElement('afterend', group); }
@@ -180,6 +182,7 @@ function drawModal() {
     const label = document.createElement('label'); label.innerHTML = `After dinner (optional)<select name="activityId"><option value="">Keep it to dinner</option>${(S.activities || []).map(p => `<option value="${esc(p.id)}" ${p.id === current ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
     form.insertBefore(label, form.querySelector('[type="submit"]'));
   }
+  if (modal.type === 'facts' && modal.facts?.activity) $('.modal-content')?.insertAdjacentHTML('beforeend', `<div class="section-heading"><h3>Second stop</h3></div>${factsView(modal.facts.activity)}`);
   if ($('.modal-content')) $('.modal-content').scrollTop = scroll;
   for (const name of openDetails) { const detail = [...document.querySelectorAll('.modal-content details')].find(d => d.className === name); if (detail) detail.open = true; }
   if (!sameModal) $('.modal input:not([type="checkbox"]), .modal textarea, .modal button')?.focus({ preventScroll: true });
