@@ -44,7 +44,7 @@ The model name is configurable; use one available to your account. Gemini interp
 ```dotenv
 AGENT_PROVIDER=nvidia
 NVIDIA_API_KEY=your-key
-NVIDIA_MODEL=meta/llama-3.3-70b-instruct
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 NVIDIA supplies the personal-agent model through its chat-completions API. Web search is a separate capability: the current search adapter uses Gemini grounding and therefore also needs a Gemini key plus `ENABLE_WEB_SEARCH=true`. NVIDIA inference alone does not supply a browser.
