@@ -3,10 +3,21 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, MAIN_IDS, publicUser } from './lib/data.mjs';
-import { Engine, AppError, assert, clean } from './lib/engine.mjs';
+import { Engine, AppError, assert, validDate, validTime } from './lib/engine.mjs';
 import { providerStatus } from './lib/providers.mjs';
 
 const publicDir = resolve('public');
+// Fixed-window counters. Keys are user ids or socket addresses; the map is pruned so it cannot grow without bound.
+export function limiter(max, windowMs) {
+  const hits = new Map();
+  const entry = key => { let h = hits.get(key); if (!h || Date.now() - h.since > windowMs) { if (hits.size > 10_000) hits.clear(); h = { since: Date.now(), count: 0 }; hits.set(key, h); } return h; };
+  return { hit: key => ++entry(key).count <= max, blocked: key => entry(key).count >= max };
+}
+// A DNS-rebinding page reaches loopback under its own hostname; only names we serve are accepted.
+const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]', ...(process.env.ALLOWED_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean)]);
+const hostAllowed = host => allowedHosts.has(String(host || '').toLowerCase().replace(/:\d+$/, ''));
+// Routes that can reach a paid model or search provider.
+const modelRoutes = new Set(['/api/chat', '/api/facts', '/api/plans', '/api/plans/revise']);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 async function body(req) {
@@ -20,35 +31,45 @@ function calendar(p) {
 }
 
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {
-  const loginAttempts = new Map();
+  const loginByAddress = limiter(30, 60_000), failedByAccount = limiter(10, 15 * 60_000);
+  const modelCalls = limiter(20, 60_000), writes = limiter(120, 60_000);
+  const streams = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' about:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     try {
+      assert(hostAllowed(req.headers.host), 'Unrecognized host.', 421);
+      const url = new URL(req.url, `http://${req.headers.host}`);
       if (!url.pathname.startsWith('/api/')) {
         assert(req.method === 'GET' || req.method === 'HEAD', 'Method not allowed.', 405);
         const route = url.pathname === '/' ? '/index.html' : url.pathname === '/demo' ? '/demo.html' : url.pathname;
-        const file = resolve(publicDir, '.' + decodeURIComponent(route));
-        assert(file.startsWith(publicDir + sep), 'Not found.', 404);
-        try { assert((await stat(file)).isFile(), 'Not found.', 404); const data = await readFile(file); res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return; } catch { throw new AppError('Not found.', 404); }
+        try { const file = resolve(publicDir, '.' + decodeURIComponent(route)); assert(file.startsWith(publicDir + sep), 'Not found.', 404); assert((await stat(file)).isFile(), 'Not found.', 404); const data = await readFile(file); res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return; } catch { throw new AppError('Not found.', 404); }
       }
       if (req.method !== 'GET' && req.headers.origin) assert(req.headers.origin === `http://${req.headers.host}` || req.headers.origin === `https://${req.headers.host}`, 'Cross-origin request rejected.', 403);
-      if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus() });
+      if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus(), defaultPassword: store.defaultPassword });
       if (url.pathname === '/api/accounts' && req.method === 'GET') return json(res, 200, MAIN_IDS.map(id => publicUser(store.data.users[id])));
       if (url.pathname === '/api/login' && req.method === 'POST') {
-        const key = req.socket.remoteAddress; let attempts = loginAttempts.get(key);
-        if (!attempts || Date.now() - attempts.since > 60_000) { attempts = { since: Date.now(), count: 0 }; loginAttempts.set(key, attempts); }
-        assert(++attempts.count <= 30, 'Too many login attempts. Try again in a minute.', 429);
+        assert(loginByAddress.hit(req.socket.remoteAddress), 'Too many login attempts. Try again in a minute.', 429);
         const input = await body(req); assert(typeof input.username === 'string' && typeof input.password === 'string', 'Enter your username and password.');
-        const session = store.login(input.username, input.password); assert(session, 'That username or password is incorrect.', 401); return json(res, 200, session);
+        const account = input.username.toLowerCase().trim();
+        assert(!failedByAccount.blocked(account), 'This account is temporarily locked after repeated failed logins. Try again in 15 minutes.', 429);
+        const session = store.login(input.username, input.password);
+        if (!session) failedByAccount.hit(account);
+        assert(session, 'That username or password is incorrect.', 401); return json(res, 200, session);
       }
       const token = req.headers.authorization?.replace(/^Bearer /, ''); const user = store.authenticate(token); assert(user, 'Please log in again.', 401); const id = user.id;
       if (url.pathname === '/api/events' && req.method === 'GET') {
+        assert((streams.get(id) || 0) < 8, 'Too many live connections for this account.', 429);
+        streams.set(id, (streams.get(id) || 0) + 1);
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
         const listener = revision => res.write(`data: ${JSON.stringify({ revision })}\n\n`); store.listeners.add(listener); listener(store.data.revision);
         const heartbeat = setInterval(() => { if (!store.authenticate(token)) res.end(); else res.write(': keepalive\n\n'); }, 15000);
-        res.on('close', () => { clearInterval(heartbeat); store.listeners.delete(listener); }); return;
+        res.on('close', () => { clearInterval(heartbeat); store.listeners.delete(listener); streams.set(id, streams.get(id) - 1); }); return;
+      }
+      if (req.method === 'POST') {
+        assert(writes.hit(id), 'You’re going a little fast. Try again in a minute.', 429);
+        assert(!modelRoutes.has(url.pathname) || modelCalls.hit(id), 'Your agent needs a short break. Try again in a minute.', 429);
       }
       if (req.method === 'GET') {
         if (url.pathname === '/api/state') return json(res, 200, engine.state(id));
@@ -73,7 +94,12 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/save': result = engine.savePlace(id, input.placeId); break;
         case '/api/like': engine.like(id, input.reviewId); break;
         case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true); break;
-        case '/api/facts': assert(store.data.places[input.placeId], 'Place not found.', 404); result = await engine.facts(input.placeId, clean(input.date || engine.state(id).defaultDate, 10), clean(input.time || '19:00', 5)); break;
+        case '/api/facts': {
+          assert(Object.hasOwn(store.data.places, String(input.placeId)), 'Place not found.', 404);
+          const date = input.date || engine.state(id).defaultDate, time = input.time || '19:00';
+          assert(validDate(date) && validTime(time), 'Choose a valid date and time.');
+          result = await engine.facts(input.placeId, date, time); break;
+        }
         case '/api/plans': result = engine.createPlan(id, input); break;
         case '/api/plans/approve': result = engine.approve(id, input.planId, input.revision); break;
         case '/api/plans/rsvp': result = engine.rsvp(id, input.planId, input.response); break;

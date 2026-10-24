@@ -74,6 +74,8 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 
 ## Privacy boundary
 
+See [docs/SECURITY.md](docs/SECURITY.md) for the threat model, every protection with the test that proves it, and known limits.
+
 `Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. A person’s model gets only their own private context. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
 
 The application server stores the contexts and is trusted infrastructure; this is logical per-agent access separation, not end-to-end encryption or isolated model processes. The local demo is bound to loopback by default. Production rollout would need HTTPS, deployment configuration, account management, stronger operational controls, and a proper database migration strategy.
