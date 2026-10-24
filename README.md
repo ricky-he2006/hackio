@@ -90,9 +90,9 @@ The application server stores the contexts and is trusted infrastructure; this i
 
 `scripts/import_seed.py` reads the supplied workbook without changing it. `data/seed.json` contains its 20 sheets, including four main people, 32 fictional secondary people, 308 synthetic opinions, 112 network edges, and 4,251 OSM places plus 90 starter venue rows. Duplicate venue listings from different sources retain their original identifiers.
 
-Synthetic reviews are labeled throughout the UI. The original sentiment-only rows receive explicitly described derived taste scores. Venue artwork is original illustrative SVG, not photography of the named venue. Hours and prices are not fabricated. A plan’s **proposed meal allowance is not a restaurant price**.
+Synthetic reviews are labeled throughout the UI. The original sentiment-only rows receive explicitly described derived taste scores. With `GOOGLE_PLACES_KEY`, chat, place, and match cards show the venue’s Google Places photo (credited to its photographer); without it they show an OpenStreetMap map snippet. Feed review cards keep a placeholder until reviewers can upload their own photos. Hours and prices are not fabricated. A plan’s **proposed meal allowance is not a restaurant price**.
 
-OpenStreetMap data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under ODbL; source links are retained with each listing.
+OpenStreetMap data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under ODbL; source links are retained with each listing, and the app credits OSM on the profile screen. Venue photos, street addresses for OSM venues without one, and the place-page map come from Google Maps Platform and are shown with Google’s attribution.
 
 ## Tests
 

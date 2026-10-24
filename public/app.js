@@ -481,7 +481,8 @@ function profileScreen() {
     ${ui.catOpen ? `<div class="listbox" role="listbox" aria-labelledby="cat-label">${cats.map(c => `<button role="option" aria-selected="${c === ui.pcat}" data-action="cat" data-value="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}</div></div>
   <main class="content" data-scroll style="padding-top:14px"><ul class="stack gap-10" aria-label="${ui.ptab === 'been' ? 'Your ratings, highest first' : 'Your want to try list'}">
     ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
-      || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul></main>${tabbar('you')}`;
+      || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul>
+    <p class="meta-12 center" style="margin-top:24px">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Photos and maps © Google</p></main>${tabbar('you')}`;
 }
 function settingsScreen() {
   const p = S.me.private;
