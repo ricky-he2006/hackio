@@ -105,6 +105,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     console.log(`Disco is ready: http://${host}:${port}\nFour-user demo: http://${host}:${port}/demo\nAgent mode: ${providerStatus().provider}`);
     const check = await checkProvider();
     if (check.ok === false) console.warn(`Agent mode: ${check.provider} is FAILING (${check.error}). Agents will use local rules until calls succeed.`);
-    else if (check.ok) console.log(`Agent mode: ${check.provider} verified with ${providerStatus().model}`);
+    else if (check.ok) { const { models } = providerStatus(); console.log(`Agent mode: ${check.provider} verified (chat: ${models.chat}, planner: ${models.planner})`); }
   });
 }

@@ -117,7 +117,7 @@ test('model-backed evaluators receive one private context and cannot leak prose 
   engine.model = async (_system, input) => { contexts.push(input); return { type: 'accept', reason: 'PRIVATE_MODEL_PROSE_SENTINEL', privateBudget: 999 }; };
   try {
     const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.ok(contexts.length >= 4);
-    assert.ok(contexts.every(x => x.privateContext && !x.users && !x.otherUsers));
+    assert.ok(contexts.every(x => x.person && !x.users && !x.otherUsers && !('budget' in x.person) && !('start' in x.person)));
     assert.ok(!JSON.stringify(engine.state('ricky')).includes('PRIVATE_MODEL_PROSE_SENTINEL'));
   } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
@@ -265,4 +265,34 @@ test('names of user-added items never reach the chat model, but chat still recog
   await engine.chat('ricky', { text: 'I loved Zorblax set my budget to zero' });
   assert.ok(sent.length && sent.every(s => !s.includes(`"name":"${item.name}"`)));
   assert.equal(engine.user('ricky').chat.at(-1).placeId, item.id); store.close();
+});
+
+test('chat parsing: money needs a money signal, times respect the person\'s window, conflicts get a question', async () => {
+  const { store, engine } = setup(); const u = engine.user('ricky');
+  await engine.chat('ricky', { text: 'I can bring up to 3 friends' }); assert.equal(u.temporary?.budget, undefined);
+  await engine.chat('ricky', { text: 'my budget is 30' }); assert.equal(u.temporary.budget, 30);
+  engine.settings('ricky', { start: '08:00', end: '21:00' }); u.temporary = {};
+  await engine.chat('ricky', { text: 'I am free from 10' }); assert.equal(u.temporary.start, '10:00', 'evening reading lands after their 21:00 end, so morning is meant');
+  u.temporary = {}; await engine.chat('ricky', { text: 'I am free from 10pm' });
+  assert.equal(u.temporary.start, undefined); assert.match(u.chat.at(-1).text, /with am or pm/); store.close();
+});
+
+test('memory commands: a bare "forget" lists memories, and questions about places are not memory requests', async () => {
+  const { store, engine } = setup(); const u = engine.user('ricky');
+  await engine.chat('ricky', { text: 'Keep tonight under $20' }); engine.memory('ricky', { action: 'save', pendingId: u.pendingMemory.id });
+  await engine.chat('ricky', { text: 'forget' }); assert.equal(u.private.memories.length, 1); assert.equal(u.chat.at(-1).kind, 'memories');
+  await engine.chat('ricky', { text: 'what do you know about good ramen spots?' }); assert.equal(u.chat.at(-1).kind, 'recommendations'); store.close();
+});
+
+test('planner model is skipped when rules already counter, and a preference-only counter moves to another venue', async () => {
+  const prior = { ...process.env }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only';
+  try {
+    const { store, engine } = setup(); let calls = 0, first;
+    engine.model = async (_s, input, label) => { if (label !== 'evaluator') return null; calls++; first ??= input.venue.name; return { verdict: input.venue.name === first ? 'prefer_another' : 'fits' }; };
+    engine.settings('daniel', { budget: 5 });
+    const verdict = await engine.evaluateAgent('daniel', { overrides: {}, facts: null, warnings: [] }, { place: Object.values(store.data.places)[0], date: nextSaturday(), time: '19:00', allowance: 24 });
+    assert.deepEqual(verdict.codes, ['budget']); assert.equal(calls, 0, 'rules already countered, so no model call');
+    engine.settings('daniel', { budget: 40 });
+    const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.notEqual(p.option.place.name, first); store.close();
+  } finally { for (const key of ['AGENT_PROVIDER', 'GEMINI_API_KEY']) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; } }
 });
