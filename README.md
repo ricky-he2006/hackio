@@ -11,7 +11,6 @@ npm start
 ```
 
 On this Windows machine, where Node is not on PATH:
-
 ```powershell
 .\start.ps1
 ```
@@ -76,7 +75,13 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 
 ## Privacy boundary
 
-`Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. A person’s model gets only their own private context. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
+`Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
+
+- **Model inputs are allow-listed.** A person’s model gets only the fields it reasons over from their own context (budget, hours, days, diet, preferences, interests, energy). Saved-memory history, raw web text, rendered search HTML, and URLs are not sent.
+- **Nothing publishes from chat without consent.** When you mention a place you liked, your agent suggests a review; you write the note and post it. Your chat message is never used as the quote.
+- **Unverified diet checks are flagged privately.** If a strict diet passed only because a web source claimed it, that person’s own agent says so. The group is not told.
+- **Untrusted text is kept out of instructions.** User-added items’ names never reach web search or the chat model, and listed venues enter the search prompt as a labelled data block.
+- **Accepted trade-off:** because counters say *what* kind of change is needed, a host who keeps revising one plan can narrow down a friend’s rough budget band or free hours. Disco is built for trusted friend groups, so this is accepted; exact values and reasons still stay with each agent.
 
 The application server stores the contexts and is trusted infrastructure; this is logical per-agent access separation, not end-to-end encryption or isolated model processes. The local demo is bound to loopback by default. Production rollout would need HTTPS, deployment configuration, account management, stronger operational controls, and a proper database migration strategy.
 
