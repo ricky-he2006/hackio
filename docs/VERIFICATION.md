@@ -2,7 +2,7 @@
 
 ## Automated
 
-14 tests pass with Node 24.22.1, including:
+The current suite passes with Node 24.22.1. `npm run check` reports 50 passing tests, including:
 
 - Password login and session revocation for all four prepared accounts.
 - Full negotiation → approval → invitations → RSVP → private change → reapproval → reconfirmation → simulated booking.
@@ -17,6 +17,11 @@
 - Per-person model context and removal of model-generated prose from negotiation messages.
 - Gemini/NVIDIA HTTP contract tests with stubbed responses; uncited web claims stay unverified.
 - HTTP authentication, cross-origin rejection, source-file isolation, and calendar-export gating.
+- Privacy-safe friend profile projections and non-friend rejection.
+- Review edit/delete ownership and recommendation cleanup.
+- Viewer-scoped notification projections with private-change redaction.
+- Invite-link preview states and duplicate-safe friend requests.
+- Ephemeral location-aware distance calculations with OSU fallback validation.
 
 ## Browser walkthrough
 
@@ -31,8 +36,9 @@ Verified using the running app:
 7. Approved the change and observed reconfirmation states.
 8. Used the review form as Daniel to post a clearly labeled demo opinion of North Market Downtown; verified it appeared immediately in the feed.
 9. Visually checked the four-phone layout, mobile feed, catalog search, review form, approval view, and private change form.
+10. Automated checks cover friend profile browsing, review management, notification inbox projections, invite-link resolution, and near-me fallback validation; browser visual walkthrough remains pending because no browser surface was available in this restricted environment.
 
-The reviewed UI contains that rehearsal plan and the clearly labeled demo review. The local SQLite database preserves them; it is not committed.
+The reviewed UI contains that rehearsal plan and the clearly labeled demo review. The local SQLite database preserves them; it is not committed. Screenshot capture was unavailable in the restricted browser environment; the manual checks and automated projections remain reproducible with `npm run check`.
 
 ## Not yet verified against external services
 

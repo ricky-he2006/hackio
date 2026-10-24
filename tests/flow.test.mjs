@@ -45,6 +45,28 @@ test('privacy: other contexts, private change text, and unconnected opinions nev
   assert.ok(engine.state('arnav').me.private.preferences.includes('PRIVATE_REASON_SENTINEL')); store.close();
 });
 
+test('friend profile exposes public lists only', () => {
+  const { store, engine } = setup();
+  const profile = engine.profile('ricky', 'aditya');
+  assert.equal(profile.user.id, 'aditya');
+  assert.ok(Array.isArray(profile.been));
+  assert.ok(Array.isArray(profile.wantToTry));
+  assert.ok(Array.isArray(profile.reviews));
+  assert.equal(profile.user.private, undefined);
+  assert.equal(profile.user.passwordHash, undefined);
+  assert.equal(profile.private, undefined);
+  assert.equal(profile.temporary, undefined);
+  assert.equal(profile.chat, undefined);
+  store.close();
+});
+
+test('non-friend profile is rejected without a private projection', () => {
+  const { store, engine } = setup();
+  const stranger = engine.state('ricky').people.find(p => p.fictional).id;
+  assert.throws(() => engine.profile('ricky', stranger), /friends only/);
+  store.close();
+});
+
 test('no convergence asks host; hard dietary needs cannot be silently accepted', async () => {
   const { store, engine } = setup(); engine.user('arnav').private.days = [];
   const p = await start(engine); assert.equal(p.state, 'needs_decision'); assert.equal(p.round, 3); assert.deepEqual(p.participants, MAIN_IDS);
@@ -72,6 +94,76 @@ test('fresh opinions change friend recommendations and remain attributed to the 
   assert.match(after[0].change, /Daniel/);
   engine.review('daniel', { placeId: target.id, rating: 1, quote: 'Changed my mind, disappointing.', tags: [] });
   assert.equal(engine.d.reviews.filter(r => r.userId === 'daniel' && r.placeId === target.id).length, 1); store.close();
+});
+
+test('review author can edit and delete their review', () => {
+  const { store, engine } = setup();
+  const placeId = engine.quickPicks('daniel')[0].place.id;
+  const created = engine.review('daniel', { placeId, rating: 7, quote: 'A solid first visit.', tags: ['casual'] });
+  const edited = engine.review('daniel', { reviewId: created.id, placeId, rating: 9, quote: 'I would absolutely go back.', tags: ['groups'] });
+  assert.equal(edited.id, created.id);
+  assert.equal(engine.state('daniel').myReviews.find(r => r.id === created.id).rating, 9);
+  engine.deleteReview('daniel', created.id);
+  assert.equal(engine.state('daniel').myReviews.some(r => r.id === created.id), false);
+  store.close();
+});
+
+test('review ownership blocks edits and deletes', () => {
+  const { store, engine } = setup();
+  const review = engine.state('daniel').myReviews[0];
+  assert.throws(() => engine.review('ricky', { reviewId: review.id, placeId: review.placeId, rating: 1, quote: 'Nope.', tags: [] }), /your own review/);
+  assert.throws(() => engine.deleteReview('ricky', review.id), /your own review/);
+  assert.equal(engine.d.reviews.find(r => r.id === review.id).quote, review.quote);
+  store.close();
+});
+
+test('notifications are viewer-scoped and redact private plan text', async () => {
+  const { store, engine } = setup();
+  const p = await start(engine); engine.approve('ricky', p.id, p.revision);
+  const arnav = engine.user('arnav'); arnav.private.preferences = 'NOTIFICATION_PRIVATE_SENTINEL';
+  engine.revise('arnav', p.id, { constraints: { start: '21:00', preferences: 'NOTIFICATION_PRIVATE_SENTINEL' } }); await engine.jobs.get(p.id);
+  const notifications = engine.notifications('ricky');
+  const json = JSON.stringify(notifications);
+  assert.ok(notifications.some(n => n.kind === 'plan_changed' || n.kind === 'approval'));
+  assert.ok(!json.includes('NOTIFICATION_PRIVATE_SENTINEL'));
+  assert.ok(!json.includes('preferences'));
+  assert.ok(!JSON.stringify(engine.notifications('daniel')).includes('NOTIFICATION_PRIVATE_SENTINEL'));
+  store.close();
+});
+
+test('invite preview returns safe status and friend request is idempotent', () => {
+  const { store, engine } = setup();
+  const stranger = engine.state('ricky').people.find(p => p.fictional).id;
+  const preview = engine.invitePreview('ricky', stranger);
+  assert.equal(preview.status, 'available');
+  assert.equal(preview.inviter.id, stranger);
+  assert.equal(preview.inviter.private, undefined);
+  engine.friendRequest('ricky', stranger);
+  assert.equal(engine.invitePreview('ricky', stranger).status, 'pending');
+  engine.friendRequest('ricky', stranger);
+  assert.equal(engine.d.requests.filter(r => r.from === 'ricky' && r.to === stranger).length, 1);
+  assert.equal(engine.invitePreview('ricky', 'ricky').status, 'self');
+  assert.equal(engine.invitePreview('ricky', 'missing').status, 'unknown');
+  store.close();
+});
+
+test('recommendations use supplied origin without persistence', () => {
+  const { store, engine } = setup();
+  const origin = { lat: 39.9612, lon: -82.9988, label: 'your location' };
+  const picks = engine.recommend('ricky', 'restaurants near me', { origin, limit: 3 });
+  assert.ok(picks.length);
+  const located = picks.find(p => p.place.distanceSource === 'your location');
+  assert.ok(located);
+  assert.ok(Number.isFinite(located.place.distance));
+  assert.ok(!JSON.stringify(engine.state('ricky')).includes('39.9612'));
+  assert.ok(!JSON.stringify(engine.user('ricky')).includes('your location'));
+  store.close();
+});
+
+test('invalid recommendation origin is rejected before calculation', () => {
+  const { store, engine } = setup();
+  assert.throws(() => engine.recommend('ricky', 'near me', { origin: { lat: 91, lon: 0 } }), /valid location/);
+  store.close();
 });
 
 test('the headline ask returns only places listed open Saturday, each with a friend vouching for first dates', () => {
@@ -188,6 +280,20 @@ test('HTTP auth boundary, private files, origin checks, independent sessions, an
   const other = await fetch(base + '/api/settings', { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: JSON.stringify({ budget: 0 }) }); assert.equal(other.status, 403);
   assert.equal((await fetch(base + '/')).status, 200); assert.equal((await fetch(base + '/demo')).status, 200);
   const p = await start(engine); assert.equal((await fetch(base + '/api/calendar?id=' + p.id, { headers })).status, 400);
+});
+
+test('profile, invite, and location HTTP projections enforce their boundaries', async t => {
+  const { store, engine } = setup(); const { server } = createApp({ store, engine }); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ricky', password: 'disco2026' }) });
+  const { token } = await login.json(), headers = { authorization: `Bearer ${token}` };
+  const profile = await (await fetch(base + '/api/profile?id=aditya', { headers })).json();
+  assert.equal(profile.user.id, 'aditya'); assert.equal(profile.user.private, undefined);
+  const stranger = engine.state('ricky').people.find(p => p.fictional).id;
+  assert.equal((await fetch(base + '/api/profile?id=' + stranger, { headers })).status, 403);
+  const invite = await (await fetch(base + '/api/invite?from=' + stranger, { headers })).json(); assert.equal(invite.inviter.id, stranger); assert.equal(invite.inviter.private, undefined);
+  assert.equal((await fetch(base + '/api/state?lat=91&lon=0', { headers })).status, 400);
 });
 
 test('comments stay in the friend circle; save activity groups into the feed and unsaving removes it', () => {

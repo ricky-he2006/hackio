@@ -22,7 +22,7 @@ Rehearse with the local deterministic mode first. Connect a real provider and re
 
 **1:50–2:25 — The second act.** In Arnav’s chat, say: “Can’t do 8:30, could do 9.” The agents reopen negotiation. Show the host’s before/after time. Ricky approves the update; the others get a reconfirmation. Memory asks for explicit consent; choose “Just this time” for this example.
 
-**2:25–2:45 — Learning.** If time permits, add a positive opinion as Daniel and show Ricky’s rankings update. Explain that each outing makes the next recommendation better. Skip this live step if the video is running long.
+**2:25–2:45 — Learning.** If time permits, add a positive opinion as Daniel and show Ricky’s rankings update. Open Daniel’s friend profile to show public Been and Want to try lists, then open the notification inbox. Explain that each outing makes the next recommendation better. Skip this live step if the video is running long.
 
 **2:45–3:00 — Impact and next step.** Show simulated booking confirmation or calendar download. “Next, the same approved plan can connect to restaurant reservations. People make the social decisions; their agents handle the coordination.” Mention one actual technical challenge: enforcing privacy while still making the negotiation visible.
 
@@ -45,3 +45,6 @@ Use the review form when an item’s name is ambiguous. Local-mode interpretatio
 - Local agents are deterministic, not LLMs.
 - Web results require a working search provider and source verification.
 - Booking is simulated. Calendar download is real; calendar-account sync is deferred.
+- Friend profiles and notifications are viewer-scoped public projections; private constraints and raw chat never appear there.
+- Invite links resolve to prepared Disco accounts in the demo; non-user invitations remain deferred.
+- “Near me” uses browser location only when allowed and otherwise clearly labels the seeded OSU fallback.

@@ -64,7 +64,15 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         res.on('close', () => { clearInterval(heartbeat); store.listeners.delete(listener); }); return;
       }
       if (req.method === 'GET') {
-        if (url.pathname === '/api/state') return json(res, 200, engine.state(id));
+        if (url.pathname === '/api/state') {
+          const lat = url.searchParams.get('lat'), lon = url.searchParams.get('lon');
+          assert((lat === null) === (lon === null), 'Choose a valid location.');
+          const origin = lat === null ? null : { lat: Number(lat), lon: Number(lon), label: 'your location' };
+          if (origin) assert(Number.isFinite(origin.lat) && Number.isFinite(origin.lon) && origin.lat >= -90 && origin.lat <= 90 && origin.lon >= -180 && origin.lon <= 180, 'Choose a valid location.');
+          return json(res, 200, engine.state(id, origin));
+        }
+        if (url.pathname === '/api/profile') return json(res, 200, engine.profile(id, url.searchParams.get('id')));
+        if (url.pathname === '/api/invite') return json(res, 200, engine.invitePreview(id, url.searchParams.get('from')));
         if (url.pathname === '/api/catalog') return json(res, 200, engine.catalog(id, url.searchParams.get('q') || ''));
         if (url.pathname === '/api/place') return json(res, 200, engine.place(id, url.searchParams.get('id')));
         // Each lookup can be a paid Places call; the browser keeps results for the session, so this only bites on abuse.
@@ -85,6 +93,7 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/temporary/clear': user.temporary = {}; user.pendingMemory = null; store.save(); break;
         case '/api/memory': result = engine.memory(id, input); break;
         case '/api/reviews': result = engine.review(id, input); break;
+        case '/api/reviews/delete': result = engine.deleteReview(id, input.reviewId); break;
         case '/api/items': result = engine.addItem(id, input); break;
         case '/api/save': result = engine.savePlace(id, input.placeId); break;
         case '/api/like': engine.like(id, input.reviewId); break;
