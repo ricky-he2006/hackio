@@ -164,7 +164,7 @@ test('want-to-try matches share only a free-time conclusion and can be hidden fo
   const { store, engine } = setup(); engine.user('arnav').private.preferences = 'MATCH_PRIVATE_SENTINEL';
   const place = engine.quickPicks('ricky')[0].place.id; engine.savePlace('ricky', place); engine.savePlace('arnav', place); engine.savePlace('aditya', place);
   const match = engine.state('ricky').matches.find(m => m.place.id === place);
-  assert.deepEqual(match.friends.map(f => f.id).sort(), ['aditya', 'arnav']); assert.match(match.window.text, /^All free (Saturday|Sunday), /);
+  assert.deepEqual(match.friends.map(f => f.id).sort(), ['aditya', 'arnav']); assert.match(match.window.text, /^All free (Saturday|Sunday) (morning|afternoon|evening)$/);
   assert.ok(!JSON.stringify(match).includes('MATCH_PRIVATE_SENTINEL')); assert.ok(!JSON.stringify(match).includes(String(engine.user('arnav').private.budget) + ','));
   engine.dismissMatch('ricky', place); assert.equal(engine.state('ricky').matches.length, 0); store.close();
 });
@@ -295,4 +295,18 @@ test('planner model is skipped when rules already counter, and a preference-only
     engine.settings('daniel', { budget: 40 });
     const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.notEqual(p.option.place.name, first); store.close();
   } finally { for (const key of ['AGENT_PROVIDER', 'GEMINI_API_KEY']) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; } }
+});
+
+test('match cards show only the day and part of day, never a friend\'s exact hours', () => {
+  const { store, engine } = setup();
+  engine.settings('ricky', { start: '09:00', end: '23:59', days: ['Saturday', 'Sunday'] });
+  engine.settings('aditya', { start: '17:30', end: '21:15', days: ['Saturday'] });
+  const place = Object.values(store.data.places).find(p => /restaurant/i.test(p.category)).id;
+  engine.savePlace('ricky', place); engine.savePlace('aditya', place);
+  const window = engine.state('ricky').matches.find(m => m.place.id === place).window;
+  assert.equal(window.text, 'Both free Saturday evening'); assert.equal(window.time, '19:00');
+  assert.ok(!/17:30|21:15|5:30|9:15/.test(JSON.stringify(window)));
+  engine.settings('aditya', { start: '13:20', end: '15:40' });
+  const afternoon = engine.state('ricky').matches.find(m => m.place.id === place).window;
+  assert.equal(afternoon.text, 'Both free Saturday afternoon'); assert.equal(afternoon.time, '14:00'); store.close();
 });

@@ -81,6 +81,7 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 - **Nothing publishes from chat without consent.** When you mention a place you liked, your agent suggests a review; you write the note and post it. Your chat message is never used as the quote.
 - **Unverified diet checks are flagged privately.** If a strict diet passed only because a web source claimed it, that person’s own agent says so. The group is not told.
 - **Untrusted text is kept out of instructions.** User-added items’ names never reach web search or the chat model, and listed venues enter the search prompt as a labelled data block.
+- **Shared free time is coarse.** “It’s a match” cards say “Both free Saturday evening”, never the exact overlap, which would reveal a friend’s private hours.
 - **Accepted trade-off:** because counters say *what* kind of change is needed, a host who keeps revising one plan can narrow down a friend’s rough budget band or free hours. Disco is built for trusted friend groups, so this is accepted; exact values and reasons still stay with each agent.
 
 The application server stores the contexts and is trusted infrastructure; this is logical per-agent access separation, not end-to-end encryption or isolated model processes. The local demo is bound to loopback by default. Production rollout would need HTTPS, deployment configuration, account management, stronger operational controls, and a proper database migration strategy.

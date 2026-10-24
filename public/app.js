@@ -662,7 +662,7 @@ function quickRateScreen() {
       <p class="row gap-8 meta" style="color:var(--ink);font-weight:600">${pick.reviewers.length ? `${avStack(pick.reviewers, 22, -6)}Popular with people you know` : 'Popular in Columbus'}</p></article></div>
     <div class="stack gap-10"><div class="row gap-8">${[['loved', 'Loved it'], ['fine', 'It was fine'], ['not', 'Not for me']].map(([v, l], i) => `<button class="btn lg ${i === 0 ? 'primary' : ''}" style="font-size:15px" data-action="quick" data-value="${v}">${l}</button>`).join('')}</div>
       <div class="row gap-8"><button class="btn dashed sm-text" data-action="quick" data-value="never">Never been</button><button class="btn dashed sm-text" data-action="quick" data-value="want">${I.bookmark(false)}Want to try</button></div></div>
-    <p class="meta center" style="margin-top:auto">Quick picks become rough ratings you can fine-tune later. <button class="link" style="font-size:13px" data-action="quick-skip">Skip to friends</button></p></main>`;
+    <p class="meta center" style="margin-top:auto">Quick picks become rough ratings you can fine-tune later. Friends see your ratings and Want to try list. <button class="link" style="font-size:13px" data-action="quick-skip">Skip to friends</button></p></main>`;
 }
 
 /* 18 · Rate the night */
@@ -767,7 +767,7 @@ document.addEventListener('click', async event => {
       case 'cat': ui.pcat = el.dataset.value; ui.catOpen = false; render(); break;
       case 'comments': ui.comments.has(id) ? ui.comments.delete(id) : ui.comments.add(id); render(); break;
       case 'like': await api('/like', { reviewId: id }); await refresh(); break;
-      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
+      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try. Your friends can see it.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
       case 'tag': { const set = ui.logs[id].tags; set.has(el.dataset.value) ? set.delete(el.dataset.value) : set.add(el.dataset.value); render(); break; }
       case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
       case 'post-review': {
