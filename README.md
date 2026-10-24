@@ -70,6 +70,8 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 - Host-chosen groups, candidate restaurants, an optional second activity, bounded three-round negotiation, live status, host approval, invitations, RSVP, renegotiation, change summaries, and reconfirmations.
 - Declines, no-solution cases, stale approval, changed constraints, expired invites, and interrupted negotiation are handled explicitly.
 - Simulated booking confirmation and downloadable `.ics` event after everyone accepts. No actual restaurant booking, payment, or calendar sync occurs.
+- All 18 screens from `App Mockups.html`: chat recommendations, chat-started plans with a live “rounding up your party” card, working it out, approval sheet, invite, plan changed (including “keep the original time without them”), feed with comments and want-to-try activity, place pages with friend tag counts, log it, profile lists by category, adventures with status stickers, adventure details, friends (accept/decline), add friends with an invite link and QR code, welcome, quick rate (answers become rough ratings), want-to-try match cards with a shared free-time conclusion, and rate the night.
+- Onboarding imports (music, maps, streaming) are demo toggles only; nothing is imported. Contacts are not read.
 - Four independent mobile sessions displayed together, with live updates through authenticated server-sent events.
 
 ## Privacy boundary
@@ -103,8 +105,10 @@ Tests cover authentication, the full plan lifecycle, authorization, privacy proj
 | `lib/data.mjs` | Workbook normalization, SQLite persistence, sessions |
 | `lib/engine.mjs` | Recommendations, private agent evaluation, plans, memory, chat |
 | `lib/providers.mjs` | Gemini/NVIDIA model adapters and grounded web lookup |
-| `public/app.js` | Mobile screens and interactions |
-| `public/styles.css` | Disco’s cream/lavender design system |
+| `public/app.js` | Mobile screens, view stack, and interactions |
+| `public/styles.css` | Disco’s party-flyer design system (tokens taken from `App Mockups.html`) |
+| `public/qr.js` | Small QR encoder for invite links |
+| `public/fonts/` | Self-hosted Bricolage Grotesque, Hanken Grotesk, and Caveat (SIL OFL; see `OFL.txt`) |
 | `public/demo.*` | Four-phone demonstration layout |
 | `tests/flow.test.mjs` | Core behavioral and privacy checks |
 

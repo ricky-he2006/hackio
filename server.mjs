@@ -7,7 +7,7 @@ import { Engine, AppError, assert, clean } from './lib/engine.mjs';
 import { providerStatus } from './lib/providers.mjs';
 
 const publicDir = resolve('public');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 async function body(req) {
   let content = ''; for await (const chunk of req) { content += chunk; if (content.length > 24000) throw new AppError('Request too large.', 413); }
@@ -54,6 +54,7 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         if (url.pathname === '/api/state') return json(res, 200, engine.state(id));
         if (url.pathname === '/api/catalog') return json(res, 200, engine.catalog(id, url.searchParams.get('q') || ''));
         if (url.pathname === '/api/place') return json(res, 200, engine.place(id, url.searchParams.get('id')));
+        if (url.pathname === '/api/quickrate') return json(res, 200, engine.quickPicks(id));
         if (url.pathname === '/api/recommend') return json(res, 200, engine.recommend(id, url.searchParams.get('q') || 'restaurants'));
         if (url.pathname === '/api/calendar') {
           const p = engine.planFor(id, url.searchParams.get('id')); assert(['confirmed', 'booked'].includes(p.state), 'Confirm the plan before adding it to your calendar.');
@@ -65,14 +66,16 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/logout': store.logout(token); break;
         case '/api/chat': result = await engine.chat(id, input); break;
         case '/api/settings': result = engine.settings(id, input); break;
-        case '/api/onboard': user.onboarded = true; store.save(); break;
+        case '/api/onboard': result = engine.onboard(id, input); break;
         case '/api/temporary/clear': user.temporary = {}; user.pendingMemory = null; store.save(); break;
         case '/api/memory': result = engine.memory(id, input); break;
         case '/api/reviews': result = engine.review(id, input); break;
         case '/api/items': result = engine.addItem(id, input); break;
         case '/api/save': result = engine.savePlace(id, input.placeId); break;
         case '/api/like': engine.like(id, input.reviewId); break;
-        case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true); break;
+        case '/api/comment': result = engine.comment(id, input.reviewId, input.text); break;
+        case '/api/matches/dismiss': result = engine.dismissMatch(id, clean(input.placeId, 80)); break;
+        case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true, input.decline === true); break;
         case '/api/facts': assert(store.data.places[input.placeId], 'Place not found.', 404); result = await engine.facts(input.placeId, clean(input.date || engine.state(id).defaultDate, 10), clean(input.time || '19:00', 5)); break;
         case '/api/plans': result = engine.createPlan(id, input); break;
         case '/api/plans/approve': result = engine.approve(id, input.planId, input.revision); break;
@@ -80,6 +83,8 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/plans/revise': result = engine.revise(id, input.planId, input); break;
         case '/api/plans/cancel': engine.cancel(id, input.planId); break;
         case '/api/plans/book': result = engine.book(id, input.planId); break;
+        case '/api/plans/drop': result = engine.dropParticipant(id, input.planId, input.userId); break;
+        case '/api/plans/rate': result = engine.rateNight(id, input.planId, input); break;
         default: throw new AppError('Not found.', 404);
       }
       json(res, 200, result);

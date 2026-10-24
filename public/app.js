@@ -1,44 +1,164 @@
+import { qrSvg } from './qr.js';
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const slot = new URLSearchParams(location.search).get('slot') || 'single';
 const tokenKey = `disco-session-${slot}`;
-let token = sessionStorage.getItem(tokenKey), S, view = 'chat', modal = null, modalKey = '', pending = false, streamController, refreshTimer;
-let chatDraft = '', filter = 'All', searchTimer, returnFocus;
-const icons = {
-  chat: '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z"/>',
-  feed: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 7h8M8 11h8M8 15h4"/>',
-  adventures: '<path d="m12 3 3 6 6 3-6 3-3 6-3-6-6-3 6-3Z"/>',
-  you: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
-  arrow: '<path d="m5 12 14 0m-6-6 6 6-6 6"/>',
-  send: '<path d="m12 19 0-14m-6 6 6-6 6 6"/>',
-  lock: '<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/>',
-  check: '<path d="m5 12 4 4L19 6"/>',
-  close: '<path d="m6 6 12 12M6 18 18 6"/>',
-  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  pin: '<path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  save: '<path d="M6 3h12v18l-6-4-6 4V3Z"/>',
-  search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
-  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5"/>',
-  sparkle: '<path d="m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5Z"/>'
-};
-const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.sparkle}</svg>`;
-const avatar = (user, small = false) => `<span class="avatar ${esc(user?.color || 'purple')} ${small ? 'small' : ''}" aria-label="${esc(user?.name || '')}">${esc((user?.name || 'D').split(' ').map(s => s[0]).slice(0, 2).join(''))}</span>`;
-const button = (text, action, cls = '', attrs = '') => `<button class="btn ${cls}" data-action="${action}" ${attrs}>${text}</button>`;
-const prettyTime = time => { const [h, m] = (time || '00:00').split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'pm' : 'am'}`; };
-const prettyDate = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-const safeUrl = url => { try { const u = new URL(url); return ['http:', 'https:'].includes(u.protocol) ? esc(u.href) : '#'; } catch { return '#'; } };
-const statusText = { drafting: 'Draft', negotiating: 'Working it out', awaiting_approval: 'Needs your OK', invited: 'Invites are out', confirmed: 'Everyone’s in', booked: 'Demo booking', needs_decision: 'Your call', cancelled: 'Cancelled' };
+const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
+let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', lastChatLen = -1, searchTimer;
+let stack = [{ name: 'chat' }];
+const drafts = {}, scrolls = {};
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set() };
 
-async function api(path, data, options = {}) {
-  const response = await fetch('/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: data === undefined ? undefined : JSON.stringify(data), ...options });
+/* ---------- Icons (drawn from the mockup boards) ---------- */
+const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
+const line = (d, color = '#1D1A2F', width = 2.25) => `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+const I = {
+  back: svg(20, 20, line('M12.5 4L6.5 10l6 6')),
+  close: svg(20, 20, line('M5 5l10 10M15 5L5 15')),
+  send: svg(18, 18, line('M9 14V4M5 8l4-4 4 4')),
+  check: svg(16, 16, line('M3 8.5l3 3 7-7', '#1F7A50')),
+  arrow: svg(16, 16, line('M2.5 8h9M8.5 4.5L12 8l-3.5 3.5', '#9A4A12')),
+  spin: svg(16, 16, '<circle class="spin-dash" cx="8" cy="8" r="5" fill="none" stroke="#5E5873" stroke-width="1.75" stroke-dasharray="3 2"/>'),
+  lock: svg(14, 14, '<rect x="2.5" y="6" width="9" height="6.5" rx="1.5" fill="none" stroke="#5E5873" stroke-width="1.5"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" fill="none" stroke="#5E5873" stroke-width="1.5"/>'),
+  heart: on => svg(18, 18, `<path d="M9 15.5S2.5 11.6 2.5 6.9A3.4 3.4 0 019 5a3.4 3.4 0 016.5 1.9C15.5 11.6 9 15.5 9 15.5z" fill="${on ? '#FF6F59' : 'none'}" stroke="#1D1A2F" stroke-width="1.75" stroke-linejoin="round"/>`),
+  comment: svg(18, 18, '<path d="M3 4.5h12v8H8l-3.5 2.5v-2.5H3z" fill="none" stroke="#1D1A2F" stroke-width="1.75" stroke-linejoin="round"/>'),
+  bookmark: on => svg(14, 16, `<path d="M2.5 2h9v12L7 11l-4.5 3z" fill="${on ? '#1D1A2F' : 'none'}" stroke="#1D1A2F" stroke-width="1.75" stroke-linejoin="round"/>`),
+  addFriend: svg(20, 20, '<circle cx="8" cy="7" r="3.25" fill="none" stroke="#1D1A2F" stroke-width="2"/>' + line('M2.5 17c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5M15.5 6v5M13 8.5h5', '#1D1A2F', 2)),
+  search: (color = '#1D1A2F') => svg(18, 18, `<circle cx="8" cy="8" r="5.5" fill="none" stroke="${color}" stroke-width="2"/>` + line('M12 12l4 4', color, 2)),
+  plus: svg(14, 14, line('M7 2v10M2 7h10', '#1D1A2F', 2.5)),
+  plusBig: svg(24, 24, line('M12 5v14M5 12h14', '#1D1A2F', 2.75)),
+  x: svg(12, 12, line('M3 3l6 6M9 3L3 9', '#1D1A2F', 2)),
+  share: svg(16, 16, line('M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9', '#1D1A2F', 1.75)),
+  qr: svg(16, 16, '<rect x="2" y="2" width="5" height="5" fill="none" stroke="#1D1A2F" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" fill="none" stroke="#1D1A2F" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" fill="none" stroke="#1D1A2F" stroke-width="1.5"/><path d="M9.5 9.5h2v2h-2zM12 12h2v2h-2z" fill="#1D1A2F"/>'),
+  music: svg(18, 18, '<path d="M6.5 13V4l7-1.5V11.5" fill="none" stroke="#1D1A2F" stroke-width="1.75" stroke-linejoin="round"/><circle cx="5" cy="13" r="2" fill="none" stroke="#1D1A2F" stroke-width="1.75"/><circle cx="12" cy="11.5" r="2" fill="none" stroke="#1D1A2F" stroke-width="1.75"/>'),
+  pin: svg(18, 18, '<path d="M9 16s5-4.6 5-8.5A5 5 0 004 7.5C4 11.4 9 16 9 16z" fill="none" stroke="#1D1A2F" stroke-width="1.75"/><circle cx="9" cy="7.5" r="1.75" fill="#1D1A2F"/>'),
+  play: svg(18, 18, '<rect x="2.5" y="4" width="13" height="10" rx="1.5" fill="none" stroke="#1D1A2F" stroke-width="1.75"/><path d="M7.5 7v4l3.5-2z" fill="#1D1A2F"/>'),
+  caret: svg(14, 14, line('M3 5l4 4 4-4')),
+  chevron: svg(16, 16, line('M6 3.5L10.5 8 6 12.5', '#1D1A2F', 2)),
+  loop: svg(28, 28, line('M14 4a10 10 0 019.5 7M24 7.5l-.5 3.5-3.5-.5M14 24a10 10 0 01-9.5-7M4 20.5l.5-3.5 3.5.5'), 'style="flex-shrink:0"'),
+  gear: svg(20, 20, '<circle cx="10" cy="10" r="2.75" fill="none" stroke="#1D1A2F" stroke-width="2"/>' + line('M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6', '#1D1A2F', 2))
+};
+const ball = (size = 26) => `<img src="/disco-ball.png" width="${size}" height="${size}" alt="" aria-hidden="true">`;
+
+/* ---------- Formatting helpers ---------- */
+const PALETTE = { purple: '#D9C8FF', orange: '#FFB86B', green: '#F6A8CC', blue: '#9CC8FF' };
+const EXTRA = ['#FFD666', '#C9B6FF', '#F6A8CC', '#9CC8FF', '#FFB86B', '#D9C8FF'];
+function colorOf(u) {
+  if (!u) return '#D9C8FF'; if (S && u.id === S.me.id) return '#B79CFF'; if (PALETTE[u.color]) return PALETTE[u.color];
+  let h = 0; for (const c of String(u.id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return EXTRA[h % EXTRA.length];
+}
+const firstRaw = u => (u?.name || '').split(' ')[0];
+const first = u => esc(firstRaw(u));
+const nameOf = u => S && u?.id === S.me.id ? 'You' : first(u);
+const isMe = u => S && u?.id === S.me.id;
+const av = (u, size = 34, cls = '') => `<span class="av ${cls}" aria-hidden="true" style="--s:${size}px;--f:${size <= 24 ? 10.5 : size <= 30 ? 12 : size <= 34 ? 13 : size <= 38 ? 14 : 15}px;--bg:${colorOf(u)}">${esc((u?.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+const avStack = (users, size = 30, overlap = -8) => `<span class="av-stack" style="--o:${overlap}px">${users.map(u => av(u, size)).join('')}</span>`;
+const names = list => list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
+const initials = name => esc(String(name || '').split(/\s+/).filter(w => /^[A-Za-z0-9]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join(''));
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const scoreCls = n => n >= 8 ? 'hi' : n >= 6 ? 'mid' : 'lo';
+const scoreColor = n => n >= 8 ? '#79D18A' : n >= 6 ? '#FFD666' : '#FF8A7A';
+const score = (n, cls = '', label = 'Score') => n == null ? `<span class="score empty ${cls}" aria-label="Not rated yet">–</span>` : `<span class="score ${scoreCls(n)} ${cls}" aria-label="${label} ${Number(n).toFixed(1)}">${Number(n).toFixed(1)}</span>`;
+const EAT = /restaurant|fast_food|food|cafe|coffee|tea|bar|pub|brew|pizza|bakery|brunch|ice_cream|confectionery|dining|american|italian|german|mediterranean|steak|sushi|indian|french|spanish|seafood|latin|mexican|ramen|burger/;
+function group(p) {
+  const c = String(p?.category || '').toLowerCase();
+  if (['Music', 'Movies & TV', 'Products', 'Books'].includes(p?.category)) return p.category;
+  if (/theat|cinema|nightclub|arts_centre|entertainment|immersive|concert|comedy|festival/.test(c)) return 'Live Events';
+  return EAT.test(c) ? 'Eat & Drink' : 'Places';
+}
+function typeTag(p) {
+  const c = String(p?.category || '').toLowerCase();
+  const media = { Music: ['Album', '#E6DEFF'], 'Movies & TV': ['Movie', '#DDEFFC'], Books: ['Book', '#FFF0C2'], Products: ['Product', '#F1EBFF'] }[p?.category];
+  if (media) return media;
+  if (/cafe|coffee|tea|bakery|ice_cream|confectionery/.test(c)) return ['Café', '#F1EBFF'];
+  if (/bar|pub|brew|nightclub/.test(c)) return ['Bar', '#E6DEFF'];
+  if (EAT.test(c)) return ['Restaurant', '#FFE0D6'];
+  if (group(p) === 'Live Events') return [/cinema/.test(c) ? 'Cinema' : 'Live', '#FFF0C2'];
+  return [cap(c.replace(/_/g, ' ')) || 'Place', '#FFFDF7'];
+}
+const tagPill = p => { const [label, bg] = typeTag(p); return `<span class="typetag" style="background:${bg}">${esc(label)}</span>`; };
+const price = p => p?.price == null ? '' : p.price < 15 ? '$' : p.price < 30 ? '$$' : '$$$';
+const distance = p => Number.isFinite(p?.distance) ? `${(p.distance * 0.621371).toFixed(1)} mi from OSU` : '';
+const GAPS = [[/^Date/, 'good for a date'], [/^Quiet/, 'quiet'], [/^Opening hours/, 'hours'], [/^Closed/, 'open then'], [/^Current menu prices/, 'prices'], [/^Above your/, 'under your price'], [/^Distance uses/, ''], [/^(\w+) not confirmed/, m => m[1].toLowerCase()]];
+const shortGap = text => { for (const [re, out] of GAPS) { const m = text.match(re); if (m) return typeof out === 'function' ? out(m) : out; } return text; };
+const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const ampm = t => { let [h, m] = t.split(':').map(Number); const pm = h >= 12 && h < 24; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${pm ? 'pm' : 'am'}`; };
+function hoursOn(raw, day) {
+  for (const rule of String(raw || '').split(';')) {
+    const m = rule.trim().match(/^([A-Za-z,\- ]+?)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/); if (!m) continue;
+    const covers = m[1].split(',').some(part => { const [a, b] = part.trim().split('-'); const ia = DAYS.indexOf(a), ib = b ? DAYS.indexOf(b) : ia; return ia >= 0 && ib >= 0 && (ia <= ib ? day >= ia && day <= ib : day >= ia || day <= ib); });
+    if (covers) return [m[2], m[3]];
+  }
+  return null;
+}
+const hoursLabel = (p, day = 6) => { const h = hoursOn(p?.hours, day); return h ? `Open ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]} ${ampm(h[0])}–${ampm(h[1])}` : ''; };
+const meta = parts => esc(parts.filter(Boolean).join(' · '));
+function ago(value) {
+  const t = Date.parse(String(value).length === 10 ? `${value}T12:00:00` : value), s = (Date.now() - t) / 1000;
+  if (!Number.isFinite(s)) return ''; if (s < 0) return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`; if (s < 86400) return `${Math.round(s / 3600)}h`; if (s < 172800) return 'Yesterday'; if (s < 604800) return `${Math.round(s / 86400)}d`;
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function dparts(date) {
+  const d = new Date(`${date}T12:00:00`), f = o => d.toLocaleDateString('en-US', o);
+  return { w: f({ weekday: 'short' }).toUpperCase(), d: d.getDate(), m: f({ month: 'short' }).toUpperCase(), long: f({ weekday: 'long' }), short: f({ weekday: 'short', month: 'short', day: 'numeric' }), md: f({ month: 'short', day: 'numeric' }) };
+}
+const t12 = (time, suffix = true) => { const [h, m] = String(time).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')}${suffix ? (h >= 12 ? ' pm' : ' am') : ''}`; };
+const plus = (time, mins) => { const [h, m] = time.split(':').map(Number), t = h * 60 + m + mins; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+const partOfDay = time => { const h = Number(String(time).split(':')[0]); return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'; };
+const todayISO = () => new Date().toLocaleDateString('en-CA');
+function stops(o) {
+  const h = Number(o.time.split(':')[0]), cafe = typeTag(o.place)[0] === 'Café';
+  const list = [{ label: `${h < 11 ? 'Brunch' : cafe ? 'Coffee' : h < 16 ? 'Lunch' : 'Dinner'} at ${o.place.name}`, place: o.place, time: o.time }];
+  if (o.activity) list.push({ label: `${group(o.activity) === 'Live Events' ? 'Show at' : 'Then'} ${o.activity.name}`, place: o.activity, time: plus(o.time, 60) });
+  return list;
+}
+const WORDS = ['', 'one', 'both', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+/* ---------- Plan status ---------- */
+function status(p) {
+  if (p.state === 'cancelled') return { key: 'cancelled', label: 'Cancelled', cls: 'gray', bg: '#E4E1DA' };
+  if (['confirmed', 'booked'].includes(p.state)) return { key: 'confirmed', label: 'Confirmed', cls: 'green', bg: '#79D18A' };
+  if (p.isHost && ['awaiting_approval', 'needs_decision'].includes(p.state)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
+  if (!p.isHost && p.state === 'invited' && ['pending', 'reconfirm'].includes(p.myRsvp)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
+  return { key: 'working', label: 'Working it out', cls: 'yellow', bg: '#FFD666' };
+}
+function statusLine(p) {
+  const others = p.participants.filter(u => u.id !== p.hostId), replied = others.filter(u => ['in', 'out'].includes(p.rsvps[u.id])).length;
+  if (p.state === 'cancelled') return 'Cancelled by the host';
+  if (p.state === 'booked') return 'Demo booking made';
+  if (p.state === 'confirmed') return 'Everyone’s in';
+  if (p.isHost && p.state === 'awaiting_approval') return p.hasPendingChange && p.changeBy && p.changeBy.id !== S.me.id ? `${firstRaw(p.changeBy)} asked for ${t12(p.option.time, false)}` : 'Ready for your OK';
+  if (p.isHost && p.state === 'needs_decision') return 'Needs a new plan';
+  if (!p.isHost && p.state === 'invited' && p.myRsvp === 'reconfirm') return 'Reconfirm the new time';
+  if (!p.isHost && p.state === 'invited' && p.myRsvp === 'pending') return 'Your reply needed';
+  if (p.state === 'invited') return `${replied} of ${others.length} replied`;
+  return 'Agents are working it out';
+}
+function planRoute(p) {
+  if (p.isHost) {
+    if (['negotiating', 'drafting', 'needs_decision'].includes(p.state)) return 'working';
+    if (p.state === 'awaiting_approval') return p.hasPendingChange ? 'changed' : 'approve';
+    return 'details';
+  }
+  return p.state === 'invited' && ['pending', 'reconfirm'].includes(p.myRsvp) ? 'invite' : 'details';
+}
+const findPlan = id => S.plans.find(p => p.id === id);
+const needsMe = () => S.plans.some(p => status(p).key === 'ok');
+
+/* ---------- Networking ---------- */
+async function api(path, data) {
+  const response = await fetch('/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: data === undefined ? undefined : JSON.stringify(data) });
   const result = await response.json();
   if (!response.ok) { if (response.status === 401 && path !== '/login') logoutLocal(); throw new Error(result.error || 'Please try again.'); }
   return result;
 }
-function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').classList.remove('show'), 4500); }
-async function refresh() { if (!token) return; try { S = await api('/state'); render(); } catch (error) { toast(error.message); } }
+function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 4200); }
+async function refresh() {
+  if (!token) return;
+  try { S = await api('/state'); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
+}
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 100); }
 async function live() {
   streamController?.abort(); streamController = new AbortController(); const controller = streamController;
@@ -47,243 +167,696 @@ async function live() {
       const response = await fetch('/api/events', { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
       if (response.status === 401) { logoutLocal(); return; }
       if (!response.ok) throw new Error('Disconnected');
-      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+      const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); let index; while ((index = buffer.indexOf('\n\n')) >= 0) { const chunk = buffer.slice(0, index); buffer = buffer.slice(index + 2); if (chunk.startsWith('data: ')) scheduleRefresh(); } }
-    } catch { /* Reconnect without interrupting the current form. */ }
+    } catch { /* Reconnect quietly; drafts stay in memory. */ }
     if (!controller.signal.aborted) await new Promise(r => setTimeout(r, 2000));
   }
 }
-function logoutLocal() { token = null; S = null; sessionStorage.removeItem(tokenKey); streamController?.abort(); modal = null; $('#app').innerHTML = ''; loginScreen(); }
+function logoutLocal() { token = null; S = null; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
 async function login(username, password) {
-  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); $('#app').innerHTML = ''; await refresh(); live();
+  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh(); live();
   if (parent !== window) parent.postMessage({ kind: 'disco-ready', user: result.user.id }, location.origin);
 }
 
-function art(category = '', variant = 0) {
-  const coffee = /tea|cafe|coffee|matcha/i.test(category);
-  return `<svg class="food-art" viewBox="0 0 360 190" aria-hidden="true"><defs><pattern id="grid${variant}" width="26" height="26" patternUnits="userSpaceOnUse"><path d="M26 0H0V26" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1"/></pattern></defs><rect width="360" height="190" fill="${coffee ? '#dce4c6' : variant % 2 ? '#e6b995' : '#dfd6ee'}"/><rect width="360" height="190" fill="url(#grid${variant})"/><ellipse cx="180" cy="153" rx="101" ry="14" fill="#252327" opacity=".09"/>${coffee ? '<ellipse cx="176" cy="145" rx="75" ry="19" fill="#faf8ee" stroke="#514936" stroke-width="2"/><path d="M222 77h16c34 0 32 46 0 46h-15" fill="none" stroke="#faf8ee" stroke-width="15"/><path d="M117 66h116l-9 60q-5 28-49 28t-49-28Z" fill="#faf8ee" stroke="#514936" stroke-width="2"/><ellipse cx="175" cy="67" rx="58" ry="18" fill="#7d945d" stroke="#514936" stroke-width="2"/><path d="M148 66q25-17 51 0-24 16-51 0m11 0q15-10 28 0" fill="none" stroke="#e4ecd0" stroke-width="3"/><path d="M157 39q-10-13 0-25m31 25q-10-13 0-25" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>' : '<ellipse cx="180" cy="102" rx="92" ry="59" fill="#faf8ee" stroke="#65574c" stroke-width="2"/><ellipse cx="180" cy="101" rx="72" ry="44" fill="#efe9d9" stroke="#c9bfa6"/><path d="m135 95 38-28 53 18-8 40-52 10-34-23Z" fill="#d49956" stroke="#a66e3d" stroke-width="2"/><path d="m148 98 24-17 35 13-9 26-33 2Z" fill="#f1ce8c"/><g fill="#708151"><ellipse cx="139" cy="118" rx="12" ry="6" transform="rotate(-35 139 118)"/><ellipse cx="215" cy="81" rx="13" ry="7" transform="rotate(35 215 81)"/><ellipse cx="198" cy="119" rx="11" ry="6"/></g><g fill="#c56c4a"><circle cx="156" cy="84" r="7"/><circle cx="214" cy="109" r="8"/><circle cx="175" cy="115" r="5"/></g><path d="M63 47v94m-7-94v25q7 9 14 0V47m-7 0v26M291 48v94m0-94q-20 23 0 39" fill="none" stroke="#5c5148" stroke-width="3" stroke-linecap="round"/>'}<path d="m306 22 3 8 9 3-9 3-3 8-3-8-9-3 9-3Z" fill="#f9f7ee"/><path d="m45 138 2 6 7 2-7 3-2 6-3-6-6-3 6-2Z" fill="#f9f7ee"/></svg>`;
+/* ---------- Navigation ---------- */
+const cur = () => stack.at(-1);
+const routeKey = r => `${stack.length}:${r.name}:${r.id || ''}`;
+function go(name, params = {}) { stack.push({ name, ...params }); load(); render(); }
+function replace(name, params = {}) { stack[stack.length - 1] = { name, ...params }; load(); render(); }
+function back() { if (stack.length > 1) stack.pop(); else stack = [{ name: 'chat' }]; render(); }
+function tab(name) { stack = [{ name }]; ui.catOpen = false; render(); }
+function openPlan(id) { const p = findPlan(id); if (p) go(planRoute(p), { id }); }
+async function load() {
+  const r = cur();
+  try {
+    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data); }
+    else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
+    else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
+    else if (r.name === 'facts' && r.placeId && !r.data) r.data = await api('/facts', { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
+    else return;
+    if (cur() === r) render();
+  } catch (error) { toast(error.message); }
 }
 
+/* ---------- Shared pieces ---------- */
+function tabbar(active) {
+  return `<nav class="tabbar" aria-label="Main">${[['chat', 'Chat'], ['feed', 'Feed'], ['adventures', 'Adventures'], ['you', 'You']].map(([v, l]) => `<button class="tab ${active === v ? 'active' : ''}" data-action="tab" data-view="${v}" ${active === v ? 'aria-current="page"' : ''}>${l}${v === 'adventures' && needsMe() ? '<i class="dot" aria-hidden="true"></i><span class="sr-only"> (needs you)</span>' : ''}</button>`).join('')}</nav>`;
+}
+const rootTab = () => stack[0].name;
+function brandbar(right) {
+  return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button>${right}</header>`;
+}
+function titlebar(title, { back: showBack = stack.length > 1, close = false, sub = '', subMuted = false, right = '', cls = '', size = '' } = {}) {
+  const nav = close ? `<button class="back" data-action="back" aria-label="Close">${I.close}</button>` : showBack ? `<button class="back" data-action="back" aria-label="Back">${I.back}</button>` : '';
+  if (cls.includes('inline')) return `<header class="titlebar ${cls}">${nav}<h1 class="title ${size}">${title}</h1>${right}</header>`;
+  return `<header class="titlebar ${cls}">${nav}${right ? `<div class="row-between"><h1 class="title ${size}">${title}</h1>${right}</div>` : `<h1 class="title ${size}">${title}</h1>`}${sub ? `<p class="subtitle ${subMuted ? 'muted' : ''}">${sub}</p>` : ''}</header>`;
+}
+const checkRow = text => `<p class="check">${I.check}${text}</p>`;
+const counterRow = text => `<p class="check counter">${I.arrow}${text}</p>`;
+const spinRow = text => `<p class="check muted">${I.spin}${text}</p>`;
+const lockNote = text => `<p class="lock-note">${I.lock}${text}</p>`;
+const sticker = (text, cls, tilt = 4, extra = '') => `<span class="sticker ${cls}" style="--tilt:${tilt}deg;${extra}">${esc(text)}</span>`;
+const photo = (p, style = '', cls = '', action = true) => action ? `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"><span>${initials(p.name)}</span></button>` : `<div class="photo ${cls}" style="${style}" aria-hidden="true"><span>${initials(p.name)}</span></div>`;
+function slider(id, value, label, bubble) {
+  return `<div class="slider" style="--c:${scoreColor(value)}"><div class="track" aria-hidden="true"></div><div class="fill" aria-hidden="true" style="width:calc(${value * 10}% + 12px)"></div><div class="thumb" aria-hidden="true" style="left:${value * 10}%"></div><input id="${id}" type="range" min="0" max="10" step="0.5" value="${value}" aria-label="${esc(label)}" data-slider data-bubble="${bubble}"></div>`;
+}
+function routeList(o, { rail = true, actions = false, party = 1 } = {}) {
+  const list = stops(o);
+  if (!rail) return `<ol class="times stack gap-8" aria-label="Route">${list.map(s => `<li><span class="t">${t12(s.time, false)}</span><span class="stop-name">${esc(s.label)}</span></li>`).join('')}</ol>`;
+  return `<ol class="route" aria-label="Route">${list.map((s, i) => {
+    const last = i === list.length - 1;
+    const railHtml = last && list.length > 1 ? `<div class="rail end" aria-hidden="true">${ball(26)}</div>` : `<div class="rail" aria-hidden="true"><span class="dot"></span>${last ? '' : '<span class="line"></span>'}</div>`;
+    const detail = actions ? ` · ${i === 0 ? `Table for ${party}` : `${party} going`}` : '';
+    const act = actions ? (i === 0 ? `<a class="pill" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.place.name} ${s.place.address || 'Columbus, OH'}`)}" target="_blank" rel="noopener noreferrer">Directions</a>` : `<button class="pill" data-action="place" data-id="${esc(s.place.id)}">Tickets</button>`) : '';
+    return `<li>${railHtml}<div class="stop-body ${actions ? 'row top gap-8' : ''}"><div class="grow"><p class="meta">${t12(s.time, false)}${detail}</p>${actions ? `<button class="stop-name s16" data-action="place" data-id="${esc(s.place.id)}">${esc(s.label)}</button>` : `<p class="stop-name">${esc(s.label)}</p>`}</div>${act}</div></li>`;
+  }).join('')}</ol>`;
+}
+
+/* ---------- Screens ---------- */
+function screen(r) {
+  if (r.name === 'chat' && !S.me.onboarded && !ui.skipWelcome) return welcomeScreen();
+  const p = r.id ? findPlan(r.id) : null;
+  switch (r.name) {
+    case 'chat': return chatScreen();
+    case 'feed': return feedScreen();
+    case 'adventures': return adventuresScreen();
+    case 'you': return profileScreen();
+    case 'place': return placeScreen(r);
+    case 'log': return logScreen(r);
+    case 'catalog': return catalogScreen(r);
+    case 'additem': return addItemScreen();
+    case 'friends': return friendsScreen();
+    case 'addfriends': return addFriendsScreen(r);
+    case 'settings': return settingsScreen();
+    case 'facts': return factsScreen(r);
+    case 'newplan': return newPlanScreen(r);
+    case 'quickrate': return quickRateScreen();
+    case 'welcome': return welcomeScreen();
+  }
+  if (!p) return `${titlebar('Adventure')}<main class="content" data-scroll><p class="body-15">This adventure isn’t available. It may have been cancelled or you’re no longer on it.</p></main>`;
+  switch (r.name) {
+    case 'working': return workingScreen(p);
+    case 'approve': return p.isHost && p.state === 'awaiting_approval' ? approveScreen(p) : detailsScreen(p);
+    case 'changed': return p.isHost && p.state === 'awaiting_approval' && p.hasPendingChange ? changedScreen(p) : detailsScreen(p);
+    case 'invite': return !p.isHost && p.state === 'invited' ? inviteScreen(p) : detailsScreen(p);
+    case 'change': return changeScreen(p);
+    case 'rate': return rateScreen(p);
+    default: return detailsScreen(p);
+  }
+}
+
+/* 1, 2, 17 · Chat */
+function chatScreen() {
+  const latest = {}; S.chat.forEach((m, i) => { if (m.planId) latest[m.planId] = i; });
+  const friends = S.friends.filter(f => MAIN_IDS.includes(f.id)).slice(0, 2);
+  const ideas = [`matcha near me, open saturdays, good for a first date`, friends.length ? `plan something saturday night with ${friends.map(f => f.name.split(' ')[0].toLowerCase()).join(' and ')}. something fun, not too pricey` : '', 'what do you remember about me?'].filter(Boolean);
+  let body = '<div style="margin-top:auto"></div>';
+  if (!S.chat.length) body += `<p class="agent-text">Hey ${first(S.me)}. Ask for a spot your friends vouch for, or tell me who you want to plan with. Nothing goes out until you say go.</p><div class="suggestions">${ideas.map(t => `<button class="label-pill" data-action="prompt" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+  body += S.chat.map((m, i) => message(m, latest[m.planId] === i)).join('');
+  if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
+  body += S.matches.map(matchCard).join('');
+  const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
+  return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile">${esc(S.me.name.charAt(0))}</button>`)}
+  <main class="content" id="chat-log" data-scroll aria-label="Conversation">${body}</main>
+  <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="${working ? 'Add someone, change the time, anything' : 'Where to? Ask or plan anything'}" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>${tabbar('chat')}`;
+}
+function message(m, isLatestForPlan) {
+  if (m.role === 'user') return `<p class="bubble">${esc(m.text)}</p>`;
+  let extra = '';
+  if (m.kind === 'recommendations') { const picks = (m.picks || []).slice(0, 3); extra = picks.map((r, i) => recCard(r, i === 0)).join(''); }
+  if (m.kind === 'planStart') { const p = findPlan(m.planId); extra = `<div class="row wrap gap-8">${(m.friends || []).map(u => `<span class="party-chip">${av(u, 28)}${first(u)}</span>`).join('')}</div><p class="agent-text">Rounding them up now. Nothing goes out until you say go.</p>${p && isLatestForPlan ? planAttachment(p) : ''}`; }
+  if (m.kind === 'plan') { const p = findPlan(m.planId); if (p && isLatestForPlan) extra = planAttachment(p); }
+  if (m.kind === 'planDraft') extra = `<button class="btn primary h48" data-action="newplan" data-draft="${esc(m.id)}">Pick your crew</button>`;
+  if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) extra = `<div class="card pad col gap-8"><p class="eyebrow">Your call, always</p><div class="row gap-8"><button class="pill primary" data-action="memory-save">Save to memory</button><button class="pill" data-action="memory-skip">Just this time</button></div></div>`;
+  if (m.kind === 'memories') extra = S.me.private.memories.map(mem => `<div class="card row-pad row gap-10"><p class="grow body-14">${esc(mem.text)}</p><button class="pill" data-action="forget" data-id="${esc(mem.id)}">Forget</button></div>`).join('');
+  if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
+  return `<div class="agent-block"><p class="agent-text">${esc(m.text)}</p>${extra}</div>`;
+}
+function recCard(rec, big) {
+  const p = rec.place, q = rec.reviews[0], who = names(rec.reviews.map(r => nameOf(r.author)));
+  const metaLine = meta([distance(p), hoursLabel(p), price(p)]) || meta([typeTag(p)[0], p.area]);
+  const gaps = (rec.unmatched || []).map(shortGap).filter(Boolean);
+  const unmatched = gaps.length ? `<p class="meta-12">Not confirmed yet: ${esc(gaps.join(', '))}</p>` : '';
+  if (big) return `<article class="card pad sh-4 col gap-8">${photo(p, 'height:104px')}${sticker(`Vouched ×${rec.votes}`, 'coral lg', 4, 'top:20px;right:20px;padding:4px 10px')}
+    <div><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${metaLine}</p></div>
+    ${q ? `<blockquote class="quote q-26">“${esc(q.quote)}”</blockquote>` : ''}
+    <div class="row gap-8">${avStack(rec.reviews.map(r => r.author), 30)}<span class="body-14 semi">${who}</span></div>${unmatched}</article>`;
+  return `<article class="card pad sh-4 col gap-4"><div class="row between base gap-8"><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="flex-shrink:0">${metaLine}</p></div>
+    ${q ? `<blockquote class="quote">“${esc(q.quote)}” <span class="by">${nameOf(q.author)}</span></blockquote>` : ''}${unmatched}</article>`;
+}
+function planAttachment(p) {
+  if (p.isHost && ['negotiating', 'awaiting_approval', 'needs_decision'].includes(p.state) && !p.hasPendingChange) return roundingCard(p);
+  return advCard(p);
+}
+function lastEntry(p, userId) { return p.log.filter(l => l.userId === userId && l.round === p.round).at(-1); }
+function roundingCard(p) {
+  const invitees = p.participants.filter(u => !isMe(u)), d = dparts(p.option.date);
+  const rows = invitees.map(u => { const last = lastEntry(p, u.id); return last?.type === 'accept' ? checkRow(`${first(u)} is free ${d.long} ${partOfDay(p.option.time)}`) : last?.type === 'counter' ? counterRow(`${first(u)} asked for another option`) : spinRow(`Asking ${first(u)}…`); });
+  const done = invitees.filter(u => lastEntry(p, u.id)?.type === 'accept').length;
+  const ready = p.state === 'awaiting_approval', stuck = p.state === 'needs_decision';
+  return `<div class="card pad-14 sh-4 col gap-8"><div class="row between"><span class="eyebrow">${ready ? 'Your party is ready' : stuck ? 'Your call' : 'Rounding up your party'}</span><span class="meta">${done} of ${invitees.length}</span></div>${rows.join('')}
+    ${stuck ? `<p class="body-14">${esc(p.issue || '')}</p>` : ''}<button class="link" style="align-self:flex-start;margin-top:2px" data-action="${ready ? 'approve-open' : 'working'}" data-id="${esc(p.id)}">${ready ? 'See the route' : 'See details'}</button></div>`;
+}
+function matchCard(m) {
+  const members = [S.me, ...m.friends], p = m.place, count = members.length, plannable = m.friends.some(f => MAIN_IDS.includes(f.id) && !f.fictional);
+  const when = m.window ? `, and ${count > 2 ? 'everyone’s' : 'you’re both'} free ${dparts(m.window.date).long} ${partOfDay(m.window.time)}` : '';
+  return `<div class="agent-block"><p class="agent-text">Good timing: ${count > 2 ? `${WORDS[count] || count} of you want` : `you and ${first(m.friends[0])} both want`} to try the same spot${when}.</p>
+  <article class="card r16 pad-14 sh-5 col gap-12" style="padding:14px">${sticker('It’s a match', 'yellow', 4, 'top:-12px;right:14px;padding:3px 10px')}
+    <div class="row gap-12">${photo(p, '', 't72')}<div class="grow"><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta row gap-6" style="margin-top:2px">${tagPill(p)}${meta([p.area, price(p)])}</p></div></div>
+    <div class="dashed-top stack gap-8"><p class="eyebrow">On everyone’s want to try</p><div class="row gap-10">${avStack(members, 34)}<p class="body-14 semi">${names(members.map(nameOf))}</p></div>
+      ${m.window ? checkRow(esc(m.window.text)) : spinRow('No shared free time this weekend yet')}
+      ${m.rating ? `<p class="check">${I.check}<span>${first(m.rating.author)} rated it ${m.rating.rating.toFixed(1)}: <span class="quote q-20">“${esc(m.rating.quote.length > 48 ? m.rating.quote.slice(0, 46) + '…' : m.rating.quote)}”</span></span></p>` : ''}</div>
+    <div class="row gap-8"><button class="btn primary h50" data-action="match-plan" data-id="${esc(p.id)}" ${plannable ? '' : 'disabled title="Planning works with your prepared friends"'}>Plan it</button><button class="btn h50 fit" data-action="match-dismiss" data-id="${esc(p.id)}">Not now</button></div></article>
+  <p class="meta">Only shared because ${count > 2 ? `all ${WORDS[count] || count}` : 'both'} of you saved it. Free times come from each person’s agent, not their calendars.</p></div>`;
+}
+
+/* 7 · Friends feed */
+const FILTERS = ['All', 'Eat & Drink', 'Places', 'Live Events', 'Music', 'Movies & TV', 'Products'];
+function feedScreen() {
+  const show = p => ui.filter === 'All' || group(p) === ui.filter || (ui.filter === 'Places' && ['Places', 'Eat & Drink', 'Live Events'].includes(group(p)));
+  const items = [...S.feed.filter(r => r.place && r.userId !== S.me.id && show(r.place)).map(r => ({ at: r.date, html: feedCard(r) })), ...(['All', 'Places', 'Eat & Drink'].includes(ui.filter) ? S.saves.map(s => ({ at: s.at, html: savesCard(s) })) : [])]
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return `${brandbar(`<div class="header-actions"><button class="icon-circle" data-action="friends" aria-label="Friends">${I.addFriend}</button><button class="icon-circle" data-action="catalog" data-purpose="browse" aria-label="Search">${I.search()}</button></div>`)}
+  <div class="chip-row filters" role="group" aria-label="Filter">${FILTERS.map(f => `<button class="chip" aria-pressed="${ui.filter === f}" data-action="filter" data-value="${esc(f)}">${esc(f)}</button>`).join('')}</div>
+  <main class="content gap-16" data-scroll aria-label="Friends activity" style="padding-top:12px;padding-bottom:90px">${items.map(i => i.html).join('') || `<div class="card empty-card"><p class="h-19">Nothing here yet</p><p class="meta">When friends rate something in this category, it shows up here.</p></div>`}</main>
+  <button class="fab" data-action="catalog" data-purpose="review" aria-label="Log a review">${I.plusBig}</button>${tabbar('feed')}`;
+}
+function feedCard(r) {
+  const p = r.place, media = ['Music', 'Movies & TV', 'Books', 'Products'].includes(p.category), saved = S.me.saved.includes(p.id), liked = r.likes.includes(S.me.id), open = ui.comments.has(r.id);
+  const body = media ? `<div class="row gap-12">${photo(p, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${photo(p, 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
+  return `<article class="card pad sh-4 col gap-10"><div class="row gap-10">${av(r.author, 36)}<div class="grow"><p class="body-14"><span class="strong">${nameOf(r.author)}</span> rated <button class="strong" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></p><p class="meta-12">${meta([typeTag(p)[0], p.area, ago(r.date), r.synthetic ? 'demo' : ''])}</p></div>${score(r.rating)}</div>
+    ${body}
+    <div class="row gap-4"><button class="pill ghost h36" data-action="like" data-id="${esc(r.id)}" aria-pressed="${liked}" aria-label="Like, ${r.likes.length} likes">${I.heart(liked)}${r.likes.length}</button><button class="pill ghost h36" data-action="comments" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Comments, ${r.comments.length}">${I.comment}${r.comments.length}</button>
+    <button class="pill h36" style="margin-left:auto" data-action="save" data-id="${esc(p.id)}" aria-pressed="${saved}">${I.bookmark(saved)}${saved ? 'Saved' : media ? 'Save' : 'Want to try'}</button></div>
+    ${open ? `<div class="comments">${r.comments.map(c => `<p class="comment"><span class="strong">${nameOf(c.author)}</span> ${esc(c.text)}</p>`).join('') || '<p class="meta">No comments yet.</p>'}<form class="composer bare" data-form="comment" data-id="${esc(r.id)}"><label class="sr-only" for="c-${esc(r.id)}">Add a comment</label><input id="c-${esc(r.id)}" class="field paper" style="height:40px" maxlength="300" placeholder="Add a comment" value="${esc(drafts['c-' + r.id] || '')}"><button class="send" style="width:40px;height:40px" aria-label="Post comment">${I.send}</button></form></div>` : ''}</article>`;
+}
+function savesCard(s) {
+  return `<article class="card pad col gap-10"><div class="row gap-10">${av(s.author, 36)}<div><p class="body-14"><span class="strong">${first(s.author)}</span> added ${s.places.length === 1 ? 'a spot' : `${s.places.length} spots`} to <span class="strong">Want to try</span></p><p class="meta-12">${esc(ago(s.at))}</p></div></div>
+    <div class="row wrap gap-8">${s.places.map(p => `<button class="label-pill" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div></article>`;
+}
+
+/* 8 · Place page */
+function placeScreen(r) {
+  const p = r.data;
+  if (!p) return `<div class="hero"><button class="icon-circle" data-action="back" aria-label="Back">${I.back}</button></div><main class="content" data-scroll><p class="meta">Loading…</p></main>`;
+  const food = group(p) === 'Eat & Drink';
+  return `<div class="hero"><span aria-hidden="true">${initials(p.name)}</span><button class="icon-circle" data-action="back" aria-label="Back">${I.back}</button></div>
+  <main class="content gap-16" data-scroll>
+    <div class="row top gap-12"><div class="grow"><h1 class="title t30">${esc(p.name)}</h1><p class="meta" style="margin-top:4px">${meta([typeTag(p)[0], p.area, price(p), hoursLabel(p)])}</p></div>
+      <div class="stack gap-4" style="align-items:center">${score(p.friendScore, 's62', 'Friend score')}<span class="eyebrow" style="font-size:11px;line-height:14px;letter-spacing:.03em">${p.friendCount} friend${p.friendCount === 1 ? '' : 's'}</span></div></div>
+    <div class="row gap-8">${p.myRating != null ? `<button class="btn lav sm-text" data-action="log" data-id="${esc(p.id)}" aria-pressed="true">${I.check}Been · ${p.myRating.toFixed(1)}</button>` : `<button class="btn sm-text" data-action="log" data-id="${esc(p.id)}" aria-pressed="false">Been</button>`}
+      <button class="btn sm-text ${p.saved ? 'lav' : ''}" data-action="save" data-id="${esc(p.id)}" aria-pressed="${p.saved}">${p.saved ? I.check + 'Saved' : 'Want to try'}</button>
+      ${food ? `<button class="btn primary sm-text" data-action="newplan" data-place="${esc(p.id)}">Plan this</button>` : ''}</div>
+    ${p.tagCounts.length ? `<section><h2 class="eyebrow">What friends say</h2><div class="row wrap gap-8" style="margin-top:8px">${p.tagCounts.map(t => `<span class="label-pill">${esc(cap(t.tag))} · ${t.count}</span>`).join('')}</div></section>` : ''}
+    <section class="stack gap-10"><h2 class="eyebrow">Friends’ reviews</h2>${p.reviews.map(rv => `<article class="card pad row top gap-10" style="padding:10px 12px">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${nameOf(rv.author)}${rv.synthetic ? ' <span class="meta-12">· demo</span>' : ''}</span><span class="h-display" style="font-weight:800">${rv.rating.toFixed(1)}</span></p><p class="quote q-22">“${esc(rv.quote)}”</p></div></article>`).join('') || '<p class="meta">No one in your circle has rated this yet.</p>'}</section>
+    <section class="stack gap-8"><h2 class="eyebrow">Details</h2><p class="meta">${esc(p.address || 'Address not provided')}${p.hours ? `<br>Listed hours: ${esc(p.hours)}` : ''}<br>${esc(p.provenance || '')}</p>
+      <div class="row wrap gap-8"><button class="pill" data-action="facts" data-id="${esc(p.id)}">Check current details</button>${p.source ? `<a class="pill" href="${safeUrl(p.source)}" target="_blank" rel="noopener noreferrer">Source ↗</a>` : ''}</div></section>
+  </main>`;
+}
+const safeUrl = url => { try { const u = new URL(url); return ['http:', 'https:'].includes(u.protocol) ? esc(u.href) : '#'; } catch { return '#'; } };
+
+/* 9 · Log a review */
+const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud'];
+function initLog(p) {
+  if (ui.logs[p.id]) return;
+  const mine = S.myReviews.find(r => r.placeId === p.id);
+  ui.logs[p.id] = { rating: mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
+  drafts.note = mine && !mine.tags.includes('quick-rate') ? mine.quote : '';
+}
+function logScreen(r) {
+  const p = r.data;
+  if (!p) return `${titlebar('Log it', { close: true, cls: 'inline', size: 't24' })}<main class="content" data-scroll><p class="meta">Loading…</p></main>`;
+  const st = ui.logs[p.id], tags = [...new Set([...TAGS, ...st.tags])];
+  return `${titlebar('Log it', { close: true, cls: 'inline', size: 't24' })}
+  <main class="content gap-22" data-scroll>
+    <div class="card row gap-12" style="padding:10px 12px">${photo(p, '', 'thumb', false)}<div class="grow"><p class="h-18">${esc(p.name)}</p><p class="meta">${meta([typeTag(p)[0], p.area])}</p></div><button class="pill text" data-action="catalog" data-purpose="review" data-replace="1">Change</button></div>
+    <section class="card r16 pad-16 sh-4 col gap-14"><div class="row between"><label for="rating" class="h-21">Your rating</label><span id="rate-bubble" class="score s68 ${scoreCls(st.rating)}" aria-hidden="true">${st.rating.toFixed(1)}</span></div>
+      ${slider('rating', st.rating, 'Your rating', 'rate-bubble')}<div class="scale" aria-hidden="true"><span>0 · Skip it</span><span>5 · Fine</span><span>10 · Go now</span></div></section>
+    <section class="stack gap-8"><label for="note" class="field-label">Note for friends</label><textarea id="note" class="textarea hand" style="height:96px" maxlength="2000" placeholder="What would you tell a friend?">${esc(drafts.note || '')}</textarea></section>
+    <section class="stack gap-8"><h2 class="field-label">Tags</h2><div class="row wrap gap-8">${tags.map(t => `<button class="chip h34" aria-pressed="${st.tags.has(t)}" data-action="tag" data-id="${esc(p.id)}" data-value="${esc(t)}">${esc(t)}</button>`).join('')}
+      ${ui.newTag ? `<form class="row gap-6" data-form="tag" data-id="${esc(p.id)}"><label class="sr-only" for="newtag">New tag</label><input id="newtag" class="field paper" style="height:34px;width:130px;font-size:13px" maxlength="30" placeholder="New tag" value="${esc(drafts.newtag || '')}"><button class="chip h34">Add</button></form>` : `<button class="chip h34 dashed" data-action="newtag" aria-label="Add a tag">+ Tag</button>`}</div></section>
+  </main>
+  <footer class="footbar"><button class="btn primary lg" data-action="post-review" data-id="${esc(p.id)}">Post to friends</button></footer>`;
+}
+
+/* Catalog search (Log → Change, Feed → search) */
+function catalogScreen(r) {
+  const results = r.data || [];
+  return `${titlebar(r.purpose === 'review' ? 'What did you try?' : 'Find something', { size: 't30' })}
+  <main class="content" data-scroll><div class="search">${I.search('#5E5873')}<label class="sr-only" for="catalog-q">Search places and things</label><input id="catalog-q" placeholder="Search places, albums, shows…" autocomplete="off" value="${esc(drafts['catalog-q'] || '')}"></div>
+    <ul class="stack gap-8">${results.map(p => `<li><button class="card row-pad row gap-12" data-action="catalog-pick" data-id="${esc(p.id)}">${photo(p, '', 'thumb', false)}<span class="grow stack"><span class="row gap-8"><span class="body-15 strong">${esc(p.name)}</span>${tagPill(p)}</span><span class="meta-12">${meta([p.area, p.reviewCount ? `${p.reviewCount} from your circle` : ''])}</span></span>${I.chevron}</button></li>`).join('') || (r.data ? '<li class="meta">No match yet. Add it below.</li>' : '<li class="meta">Loading…</li>')}</ul>
+    <button class="btn dashed h48" data-action="additem">${I.plus} Add something else</button></main>`;
+}
+function addItemScreen() {
+  return `${titlebar('Add to your taste', { size: 't30' })}<main class="content" data-scroll><form id="item-form" class="form"><label class="lbl">Name<input class="input" name="name" required maxlength="100" placeholder="An album, show, product…"></label>
+    <label class="lbl">Category<select class="select" name="category">${['Music', 'Movies & TV', 'Books', 'Products', 'Places'].map(c => `<option>${c}</option>`).join('')}</select></label><button class="btn primary lg">Next: your rating</button></form></main>`;
+}
+
+/* 10 · Profile */
+const CATS = ['Eat & Drink', 'Live Events', 'Music', 'Movies & TV', 'Products'];
+function profileScreen() {
+  const been = S.myReviews.map(r => ({ p: r.place, rating: r.rating })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
+  const extra = [...new Set([...been, ...want].map(x => group(x.p)))].filter(g => !CATS.includes(g));
+  const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  const interests = String(S.me.private.interests || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
+  return `<section class="profile-head"><button class="icon-circle gear" data-action="settings" aria-label="Settings and privacy">${I.gear}</button>
+    <div class="row gap-14"><div class="big-av" aria-hidden="true">${esc(S.me.name.charAt(0))}</div><div class="grow"><h1>${esc(S.me.name)}</h1><p class="body-14 semi" style="margin-top:2px">${esc([S.me.area, cap(interests)].filter(Boolean).join(' · '))}</p></div></div>
+    <dl class="stats"><div><dd><strong>${been.length}</strong></dd><dt><span>Been</span></dt></div><div><dd><strong>${want.length}</strong></dd><dt><span>Want to try</span></dt></div><a href="#" data-action="friends"><strong>${S.friends.length}</strong><span>Friends</span></a><div><dd><strong>${S.plans.length}</strong></dd><dt><span>Adventures</span></dt></div></dl></section>
+  <div class="seg" role="tablist" aria-label="Your places" style="margin:14px 20px 0 16px"><button role="tab" aria-selected="${ui.ptab === 'been'}" data-action="ptab" data-value="been">Been</button><button role="tab" aria-selected="${ui.ptab === 'want'}" data-action="ptab" data-value="want">Want to try</button></div>
+  <div class="row between gap-12" style="position:relative;z-index:2;flex-shrink:0;padding:14px 20px 0 16px"><span id="cat-label" class="eyebrow">${ui.ptab === 'been' ? 'Your ratings for' : 'Saved in'}</span>
+    <div class="dropdown"><button class="pill primary h42 shadow" aria-haspopup="listbox" aria-expanded="${ui.catOpen}" aria-labelledby="cat-label" data-action="cat-toggle">${esc(ui.pcat)}${I.caret}</button>
+    ${ui.catOpen ? `<div class="listbox" role="listbox" aria-labelledby="cat-label">${cats.map(c => `<button role="option" aria-selected="${c === ui.pcat}" data-action="cat" data-value="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}</div></div>
+  <main class="content" data-scroll style="padding-top:14px"><ul class="stack gap-10" aria-label="${ui.ptab === 'been' ? 'Your ratings, highest first' : 'Your want to try list'}">
+    ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
+      || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul></main>${tabbar('you')}`;
+}
+function settingsScreen() {
+  const p = S.me.private;
+  return `${titlebar('Settings', { size: 't30' })}<main class="content gap-16" data-scroll>
+    <form id="settings-form" class="card r16 pad-16 sh-4 form"><p class="eyebrow row gap-8">${I.lock} Only you and your agent</p>
+      <label class="lbl">Usual budget per outing ($)<input class="input" name="budget" type="number" min="0" max="10000" value="${esc(p.budget)}" required></label>
+      <div class="two"><label class="lbl">Free from<input class="input" name="start" type="time" value="${esc(p.start)}" required></label><label class="lbl">Until<input class="input" name="end" type="time" value="${esc(p.end)}" required></label></div>
+      <fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Days you’re usually free</legend><div class="toggle-row">${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => `<label><input type="checkbox" name="days" value="${d}" ${p.days.includes(d) ? 'checked' : ''}><span class="plain">${d.slice(0, 3)}</span></label>`).join('')}</div></fieldset>
+      <label class="lbl">Food needs<input class="input" name="dietary" value="${esc(p.dietary)}" placeholder="e.g. vegetarian, or vegetarian preferred"></label>
+      <label class="lbl">Things you love<input class="input" name="interests" value="${esc(p.interests)}" placeholder="Coffee, ramen, live music"></label>
+      <label class="lbl">Anything else<textarea class="textarea" name="preferences" rows="2">${esc(p.preferences)}</textarea></label>
+      <label class="lbl">Social energy<select class="select" name="energy">${['low', 'medium', 'high'].map(e => `<option ${p.energy === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>
+      <button class="btn primary lg">Save private settings</button><p class="meta">Your agent shares conclusions like “free after 8:30”, never these values.</p></form>
+    <button class="card pad row gap-10" data-action="prompt" data-text="What do you remember about me?"><span class="grow body-15 strong">What does my agent remember?</span>${I.chevron}</button>
+    ${Object.keys(S.me.temporary).length ? `<div class="card pad col gap-8"><p class="body-14">Some preferences from chat apply to this conversation only.</p><button class="pill" style="align-self:flex-start" data-action="clear-temporary">Clear them</button></div>` : ''}
+    <div class="row between"><span class="meta">${S.provider.provider === 'local' ? 'Local demo agents (not an LLM)' : `Agent: ${esc(S.provider.provider)}`}</span><button class="pill" data-action="logout">Log out</button></div></main>`;
+}
+
+/* 11 · Adventures */
+function adventuresScreen() {
+  const today = todayISO(), rank = p => status(p).key === 'ok' ? 0 : 1;
+  const upcoming = S.plans.filter(p => p.option.date >= today).sort((a, b) => rank(a) - rank(b) || a.option.date.localeCompare(b.option.date));
+  const past = S.plans.filter(p => p.option.date < today).sort((a, b) => b.option.date.localeCompare(a.option.date));
+  return `${titlebar('Adventures', { back: false, cls: 'top', right: `<button class="pill primary h44 shadow" data-action="newplan">${I.plus}New</button>` })}
+  <main class="content gap-18" data-scroll><h2 class="eyebrow tight">Upcoming</h2>
+    ${upcoming.map(advCard).join('') || `<div class="card empty-card"><p class="h-19">The group chat could never.</p><p class="meta">Pick your people. Your agents handle the back-and-forth.</p><button class="btn primary h48" style="width:100%" data-action="newplan">Start an adventure</button></div>`}
+    ${past.length ? `<h2 class="eyebrow" style="margin-bottom:-6px">Past</h2>${past.map(pastRow).join('')}` : ''}</main>${tabbar('adventures')}`;
+}
+function advCard(p) {
+  const st = status(p), d = dparts(p.option.date), cancelled = st.key === 'cancelled';
+  const route = cancelled ? 'Cancelled' : `${p.option.place.name}${p.option.activity ? ` → ${p.option.activity.name}` : ''} · ${t12(p.option.time, false)}`;
+  return `<button class="adv ${st.key === 'ok' ? 'sh-4' : ''}" data-action="plan" data-id="${esc(p.id)}"><span class="stub ${cancelled ? 'gray' : ''}" style="--bg:${st.bg}"><span class="w">${d.w}</span><span class="d">${d.d}</span><span class="w">${d.m}</span></span>
+    <span class="adv-body"><span class="adv-title ${cancelled ? 'struck' : ''}">${esc(p.title)}</span><span class="meta">${esc(route)}</span><span class="row gap-8" style="margin-top:6px">${avStack(p.participants, 24, -7)}<span class="meta-12">${esc(statusLine(p))}</span></span></span>
+    ${sticker(st.label, st.cls, { ok: 4, confirmed: -3, cancelled: 3, working: -4 }[st.key])}</button>`;
+}
+function pastRow(p) {
+  const others = p.participants.filter(u => !isMe(u)).map(first), rateable = ['confirmed', 'booked'].includes(p.state);
+  return `<button class="card row gap-12" style="padding:10px 12px" data-action="${rateable && p.myNightRating == null ? 'rate' : 'details'}" data-id="${esc(p.id)}"><span class="grow stack"><span class="body-15 strong">${esc(p.title)}</span><span class="meta-12">${meta([dparts(p.option.date).md, p.option.place.name, others.length ? `with ${names(others)}` : ''])}</span></span>
+    ${p.myNightRating != null ? score(p.myNightRating, 's44', 'Your rating') : rateable ? '<span class="pill">Rate it</span>' : `<span class="meta-12">${esc(status(p).label)}</span>`}</button>`;
+}
+
+/* 3 · Working it out */
+function agentRows(p, u) {
+  const rows = [];
+  for (let round = 1; round < p.round; round++) if (p.log.some(l => l.userId === u.id && l.round === round && l.type === 'counter')) rows.push(counterRow(`Asked for another option. ${round === p.round - 1 ? 'Moved the plan.' : ''}`));
+  const last = lastEntry(p, u.id);
+  if (last?.type === 'accept') rows.push(checkRow('Time, budget and food work'));
+  else if (last?.type === 'counter') rows.push(counterRow('Asked for another option'));
+  else if (p.state === 'negotiating') rows.push(spinRow(p.round > 1 ? 'Checking the new proposal' : 'Checking privately…'));
+  else if (p.state === 'needs_decision') rows.push(counterRow('Couldn’t make this one work'));
+  return rows.join('');
+}
+function workingScreen(p) {
+  const sub = p.state === 'negotiating' ? `Rounding up your party · round ${Math.max(1, p.round)} of 3` : p.state === 'awaiting_approval' ? 'Everyone’s agent said yes' : p.state === 'needs_decision' ? 'Your call: nothing worked for everyone' : statusLine(p);
+  const list = stops(p.option), reason = p.candidates.find(c => c.place.id === p.option.place.id)?.reason;
+  const people = [...p.participants].sort((a, b) => isMe(b) - isMe(a));
+  const ready = p.state === 'awaiting_approval' && p.isHost, stuck = p.state === 'needs_decision' && p.isHost;
+  return `${titlebar(esc(p.title), { cls: 'plain', size: 't30', sub, subMuted: true })}
+  <main class="content" data-scroll style="padding-top:18px">
+    <section class="card purple pad-14 sh-4"><h2 class="eyebrow">The route so far</h2><p class="h-18" style="margin-top:4px">${esc(list[0].label)} at ${t12(p.option.time, false)}${list[1] ? `, then ${esc(list[1].label.replace(/^(Show at|Then) /, list[1].label.startsWith('Show') ? 'the show at ' : ''))}` : ''}</p>
+      ${reason ? `<p class="body-14" style="margin-top:4px;font-size:13px;line-height:18px">${esc(reason)}.</p>` : p.why[0] ? `<p class="body-14" style="margin-top:4px;font-size:13px;line-height:18px">${esc(p.why[0].author.split(' ')[0])} said “${esc(p.why[0].quote)}”</p>` : ''}</section>
+    ${people.map(u => `<section class="card row top gap-12" style="padding:10px 14px" aria-label="${nameOf(u)}">${av(u, 34)}<div class="stack gap-4"><h3 class="body-15 strong">${nameOf(u)}</h3>${agentRows(p, u)}</div></section>`).join('')}
+    ${stuck ? `<div class="issue">${esc(p.issue || 'No option worked for everyone.')}</div>` : ''}
+    ${p.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
+    ${lockNote('Calendars and budgets stay private. Only yes, no or a new time is shared.')}
+  </main>
+  <footer class="footbar">${stuck ? `<button class="btn primary lg" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn lg fit" data-action="cancel" data-id="${esc(p.id)}">Cancel</button>`
+    : ready ? `<button class="btn primary lg" data-action="approve-open" data-id="${esc(p.id)}">See the route</button>`
+    : p.state === 'negotiating' ? `<button class="btn lg shadow" disabled>Still working it out…</button>` : `<button class="btn lg shadow" data-action="details" data-id="${esc(p.id)}">See the route</button>`}</footer>`;
+}
+const SORTED = { schedule: t => `Moved to ${t} so everyone can come`, budget: () => 'Brought the cost down to fit everyone', dietary_unverified: () => 'Checked the food works for everyone', closed: () => 'Picked a time they’re open', preference: () => 'Swapped in a spot the group likes more' };
+function sortedItems(p) {
+  const r = p.resolved || [], items = r.map(code => SORTED[code]?.(t12(p.option.time, false))).filter(Boolean);
+  if (!r.includes('schedule')) items.push('Works with everyone’s schedule');
+  if (!r.includes('budget')) items.push('Fits everyone’s budget');
+  if (!r.includes('dietary_unverified')) items.push('Food works for everyone');
+  return items;
+}
+
+/* 4 · You approve */
+function approveScreen(p) {
+  const d = dparts(p.option.date), items = sortedItems(p);
+  return `<div class="screen sheet-screen"><div class="sheet-peek" aria-hidden="true">${esc(p.title)}</div>
+  <section class="sheet" data-scroll aria-label="Route ready to send"><button class="grab" data-action="back" aria-label="Close"></button>
+    <div>${sticker('Ready to go', 'coral static lg', -2)}<h1 class="huge" style="margin-top:8px">${d.long}, ${t12(p.option.time)}</h1></div>
+    ${routeList(p.option)}
+    <div class="row between gap-10"><div class="row gap-10">${avStack(p.participants, 32)}<p class="body-14 semi">Everyone’s free</p></div><p class="meta" title="Proposed meal allowance, not a verified menu price">~$${esc(p.option.allowance)} each</p></div>
+    <div class="card lav pad-14"><h2 class="body-15 strong">${items.length} things sorted out privately</h2><ul class="stack gap-4" style="margin-top:6px">${items.map(t => `<li class="check">${I.check}${esc(t)}</li>`).join('')}</ul></div>
+    ${p.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
+    <div class="stack gap-12 mt-auto"><button class="btn primary lg" data-action="approve" data-id="${esc(p.id)}" data-revision="${p.revision}">Send invites</button>
+      <div class="row gap-10"><button class="btn" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn" data-action="another" data-id="${esc(p.id)}">Another route</button></div></div>
+  </section></div>`;
+}
+
+/* 5 · Invite (invitee) */
+function inviteScreen(p) {
+  const host = p.participants.find(u => u.id === p.hostId), going = p.participants.filter(u => p.rsvps[u.id] === 'in' && !isMe(u)), why = p.why[0], d = dparts(p.option.date), re = p.myRsvp === 'reconfirm';
+  return `<main class="content gap-16" data-scroll style="padding:24px 20px 20px 16px">
+    <header class="row gap-10">${stack.length > 1 ? `<button class="back" data-action="back" aria-label="Back" style="margin-left:-10px">${I.back}</button>` : ''}${av(host, 40)}<p class="body-15"><span class="strong">${first(host)}</span> ${re ? 'updated your adventure' : 'invited you on an adventure'}</p></header>
+    <article class="card r16 sh-5 col gap-14" style="padding:18px 16px">${sticker('You’re free', 'green lg', 5, 'top:-12px;right:16px;padding:3px 10px')}
+      <h1 class="huge">${d.long}, ${t12(p.option.time)}</h1>${routeList(p.option, { rail: false })}
+      <p class="meta" style="margin:-4px 0 0 52px">About $${esc(p.option.allowance)}</p>
+      ${why ? `<div class="dashed-top"><p class="eyebrow">Why this one</p><blockquote class="quote q-28" style="margin-top:4px">“${esc(why.quote)}”</blockquote><p class="meta" style="margin-top:2px">${why.authorId === S.me.id ? 'You' : esc(why.author.split(' ')[0])}${why.synthetic ? ', demo opinion' : `, in ${new Date(why.date).toLocaleDateString('en-US', { month: 'long' })}`}</p></div>` : ''}
+      ${going.length ? `<div class="row gap-10">${avStack(going, 30)}<p class="body-14 semi">${names(going.map(first))} ${going.length > 1 ? 'are' : 'is'} going</p></div>` : ''}</article>
+    <div class="row gap-10"><button class="btn primary lg" data-action="rsvp-in" data-id="${esc(p.id)}">${re ? 'Still in' : 'I’m in'}</button><button class="btn lg" data-action="rsvp-out" data-id="${esc(p.id)}">Can’t make it</button></div>
+    <form class="stack gap-8 mt-auto" data-form="tell" data-id="${esc(p.id)}"><label for="tell" class="field-label s18">Need a change? Just say it.</label><div class="row gap-8"><input id="tell" class="field paper" maxlength="500" placeholder="can’t do ${t12(p.option.time, false)}, could do ${t12(plus(p.option.time, 30), false)}" value="${esc(drafts.tell || '')}"><button class="send" aria-label="Send to your agent">${I.send}</button></div>
+      <p class="meta">${first(host)} only sees the new time, not your reason.</p></form></main>`;
+}
+
+/* 6 · Plan changed (host) */
+function changedScreen(p) {
+  const by = p.changeBy && !isMe(p.changeBy) ? p.changeBy : null, prev = p.previous, now = stops(p.option), before = prev ? stops(prev) : [];
+  const samePlace = prev && prev.place.id === p.option.place.id && (prev.activity?.id || null) === (p.option.activity?.id || null), sameBudget = prev && prev.allowance === p.option.allowance;
+  const yes = p.participants.filter(u => !isMe(u) && u.id !== by?.id && ['in', 'reconfirm'].includes(p.rsvps[u.id]));
+  const timeChanged = prev && prev.time !== p.option.time;
+  const lead = by ? (timeChanged ? `${firstRaw(by)} can’t do ${t12(prev.time, false)}. Free at ${t12(p.option.time, false).replace(':00', '')}.` : `${firstRaw(by)} asked for a change.`) : 'You asked for a change.';
+  const summary = [samePlace && sameBudget ? 'Same places, same budget.' : samePlace ? `Same places. Now about $${p.option.allowance} each.` : '', yes.length ? `${names(yes.map(firstRaw))} already said yes, so they get a quick reconfirm.` : ''].filter(Boolean).join(' ');
+  const d = dparts(p.option.date);
+  const rsvp = u => isMe(u) ? `<span class="row gap-6 green-ink strong">${I.check}In</span>` : u.id === by?.id ? '<span class="muted">Waiting on your OK</span>' : ['in', 'reconfirm'].includes(p.rsvps[u.id]) ? `<span class="row gap-6 green-ink strong">${I.check}In</span>` : '<span class="muted">Invited</span>';
+  return `<main class="content gap-16" data-scroll style="padding:24px 20px 20px 16px">
+    <header>${stack.length > 1 ? `<button class="back" data-action="back" aria-label="Back">${I.back}</button>` : ''}${sticker('Needs your OK', 'coral static lg', -2)}<h1 class="huge" style="margin-top:10px">${timeChanged ? `Route changed: ${t12(p.option.time, false)}` : 'Plan changed'}</h1></header>
+    <section class="card r16 pad-16 sh-4 col gap-14"><div class="row gap-10">${av(by || S.me, 34)}<p class="body-15">${esc(lead)}</p></div>
+      <dl class="num" style="display:grid;grid-template-columns:64px minmax(0,1fr);row-gap:10px;font-size:15px;line-height:22px">${now.map((s, i) => `<dt class="meta" style="line-height:22px">${i === 0 ? s.label.split(' at ')[0] : group(s.place) === 'Live Events' ? 'Show' : 'Next'}</dt><dd>${before[i] && (before[i].time !== s.time || before[i].place.id !== s.place.id) ? `<span class="muted" style="text-decoration:line-through">${before[i].place.id !== s.place.id ? esc(before[i].place.name) : t12(before[i].time, false)}</span> <span class="muted" aria-hidden="true">→</span> ` : ''}<span class="strong">${before[i] && before[i].place.id !== s.place.id ? esc(s.place.name) + ', ' : ''}${t12(s.time)}</span></dd>`).join('')}</dl>
+      ${summary ? `<p class="meta">${esc(summary)}</p>` : ''}</section>
+    <div class="stack gap-12"><button class="btn primary lg" data-action="approve" data-id="${esc(p.id)}" data-revision="${p.revision}">Send update</button>
+      ${by && prev && p.participants.length > 2 ? `<button class="btn" data-action="drop" data-id="${esc(p.id)}" data-user="${esc(by.id)}">Keep ${t12(prev.time, false)} without ${first(by)}</button>` : `<button class="btn" data-action="change" data-id="${esc(p.id)}">Change something</button>`}</div>
+    <section class="card r16 row mt-auto" style="overflow:hidden;align-items:stretch" aria-label="Who’s in"><div class="stub big" style="--bg:#FF6F59"><span class="w">${d.w}</span><span class="d">${d.d}</span><span class="w">${d.m}</span></div>
+      <ul class="grow stack gap-10 body-14" style="padding:14px 16px">${p.participants.map(u => `<li class="row between"><span class="semi">${nameOf(u)}</span>${rsvp(u)}</li>`).join('')}</ul></section></main>`;
+}
+
+/* 12 · Adventure details */
+function detailsScreen(p) {
+  const d = dparts(p.option.date), st = status(p);
+  const changeBanner = p.isHost && p.state === 'awaiting_approval' && p.hasPendingChange ? `<button class="card row gap-10" style="padding:10px 12px" data-action="changed" data-id="${esc(p.id)}">${sticker('Needs your OK', 'coral static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">${p.changeBy && !isMe(p.changeBy) ? `${first(p.changeBy)} moved it to ${t12(p.option.time, false)}` : 'Your change is ready'}</span><span class="link">Review</span></button>`
+    : p.state === 'negotiating' ? `<button class="card row gap-10" style="padding:10px 12px" data-action="working" data-id="${esc(p.id)}">${sticker('Working it out', 'yellow static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">Agents are rechecking</span><span class="link">Watch</span></button>`
+    : !p.isHost && st.key === 'ok' ? `<button class="card row gap-10" style="padding:10px 12px" data-action="invite" data-id="${esc(p.id)}">${sticker('Needs your OK', 'coral static', -3, 'padding:2px 8px')}<span class="grow body-14 semi">${p.myRsvp === 'reconfirm' ? 'New time to reconfirm' : 'Reply to the invite'}</span><span class="link">Open</span></button>`
+    : p.state === 'needs_decision' ? `<div class="issue">${esc(p.issue || '')}</div>` : '';
+  const who = u => { const r = p.rsvps[u.id]; if (p.hasPendingChange && p.changeBy?.id === u.id && !isMe(u)) return `<span class="st orange-ink">Asked for ${t12(p.option.time, false)}</span>`; return r === 'in' ? '<span class="st green-ink">In</span>' : r === 'out' ? '<span class="st orange-ink">Can’t make it</span>' : r === 'reconfirm' ? '<span class="st muted">Reconfirming</span>' : r === 'pending' ? '<span class="st muted">Invited</span>' : '<span class="st muted">Checking</span>'; };
+  const footer = p.isHost && p.state === 'awaiting_approval' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn primary h48" data-action="${p.hasPendingChange ? 'changed' : 'approve-open'}" data-id="${esc(p.id)}">${p.hasPendingChange ? 'Review change' : 'See the route'}</button>`
+    : !p.isHost && st.key === 'ok' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Need a change</button><button class="btn primary h48" data-action="invite" data-id="${esc(p.id)}">Reply</button>`
+    : ['confirmed', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
+    : ['invited', 'needs_decision'].includes(p.state) ? `<button class="btn primary h48" data-action="change" data-id="${esc(p.id)}">Change something</button>` : '';
+  const history = [...p.history].reverse().slice(0, 8);
+  return `${titlebar(esc(p.title), { size: 't30', sub: `${d.short} · ${t12(p.option.time)} · ~$${esc(p.option.allowance)} each` })}
+  <main class="content" data-scroll>${changeBanner}
+    <section class="card pad-14 sh-4" style="padding:14px" aria-label="Route"><h2 class="eyebrow" style="margin-bottom:10px">The route</h2>${routeList(p.option, { actions: true, party: p.participants.length })}</section>
+    <section aria-label="Who’s going"><h2 class="eyebrow" style="margin-bottom:8px">Who’s going</h2><ul class="who stack gap-8">${p.participants.map(u => `<li>${av(u, 30)}<span class="name">${nameOf(u)}</span>${who(u)}</li>`).join('')}</ul></section>
+    <section aria-label="History"><h2 class="eyebrow" style="margin-bottom:8px">How it came together</h2><ul class="history stack gap-6">${history.map(h => `<li><span>${new Date(h.at).toLocaleDateString('en-US', { weekday: 'short' })}</span><span>${esc(h.text.replace(/\b([01]\d|2[0-3]):([0-5]\d)\b/g, (_, hh, mm) => t12(`${hh}:${mm}`)))}</span></li>`).join('')}</ul></section>
+    ${p.booking ? `<div class="booking"><p class="eyebrow">Demo booking · ${esc(p.booking.reference)}</p><p class="body-14" style="margin-top:4px">${esc(p.booking.note)}</p></div>` : ''}
+    <div class="row wrap gap-8">${p.isHost && p.state === 'confirmed' ? `<button class="pill primary" data-action="book" data-id="${esc(p.id)}">Preview booking</button>` : ''}${['confirmed', 'booked'].includes(p.state) ? `<button class="pill" data-action="calendar" data-id="${esc(p.id)}">Add to calendar</button>` : ''}<button class="pill" data-action="plan-facts" data-id="${esc(p.id)}">Venue details</button>${p.isHost && !['cancelled', 'booked'].includes(p.state) ? `<button class="pill" data-action="cancel" data-id="${esc(p.id)}">Cancel plan</button>` : ''}</div>
+    ${p.log.length ? `<details class="more" data-key="log-${esc(p.id)}" ${ui.open.has('log-' + p.id) ? 'open' : ''}><summary>${I.chevron} How the agents negotiated</summary>${p.log.map(l => `<p>Round ${l.round}: ${esc(l.userId ? `${nameOf(p.participants.find(u => u.id === l.userId))}’s agent: ` : '')}${esc(l.text)}</p>`).join('')}</details>` : ''}
+    <p class="meta-12">${p.mode === 'local' ? 'Local demo agents check real constraints against your proposal.' : `Agent provider: ${esc(p.mode)}`} The cost is a proposed meal allowance, not a menu price.</p>
+  </main>${footer ? `<footer class="footbar tight">${footer}</footer>` : ''}${tabbar(rootTab())}`;
+}
+
+/* Change something (host tweak or invitee message) */
+function changeScreen(p) {
+  if (!p.isHost) return `${titlebar('Tell your agent', { size: 't30' })}<main class="content gap-16" data-scroll><p class="body-15">Say what changed. Your agent turns it into a new constraint and reopens the plan. ${first(p.participants.find(u => u.id === p.hostId))} only sees the new proposal.</p>
+    <form class="form" data-form="tell" data-id="${esc(p.id)}" data-done="details"><label class="sr-only" for="tell">What changed?</label><textarea id="tell" class="textarea hand" style="height:110px" maxlength="500" placeholder="can’t do ${t12(p.option.time, false)}, could do ${t12(plus(p.option.time, 30), false)}">${esc(drafts.tell || '')}</textarea>${lockNote('Only your agent sees what you write.')}<button class="btn primary lg">Send to my agent</button></form></main>`;
+  return `${titlebar('Change something', { size: 't30', sub: 'Your guest list stays the same. Agents recheck with everyone.', subMuted: true })}<main class="content" data-scroll><form id="tweak-form" class="form" data-id="${esc(p.id)}">
+    <div class="two"><label class="lbl">Day<input class="input" name="date" type="date" value="${esc(p.option.date)}" required></label><label class="lbl">Time<input class="input" name="time" type="time" value="${esc(p.option.time)}" required></label></div>
+    <label class="lbl">Proposed spend per person ($)<input class="input" name="allowance" type="number" min="0" max="10000" value="${esc(p.option.allowance)}" required></label>
+    <label class="lbl">Where<select class="select" name="placeId">${p.candidates.map(c => `<option value="${esc(c.place.id)}" ${c.place.id === p.option.place.id ? 'selected' : ''}>${esc(c.place.name)}</option>`).join('')}</select></label>
+    <label class="lbl">After that (optional)<select class="select" name="activityId"><option value="">Keep it to one stop</option>${(S.activities || []).map(a => `<option value="${esc(a.id)}" ${a.id === p.option.activity?.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+    <button class="btn primary lg">Recheck with everyone</button></form></main>`;
+}
+
+/* Pick friends / new plan */
+function newPlanScreen(r) {
+  const draft = r.draft || {}, chosen = new Set(draft.friends || r.friends || []);
+  return `${titlebar('Who’s coming?', { size: 't30', sub: 'You pick the people. Agents never add or remove anyone.', subMuted: true })}<main class="content" data-scroll><form id="plan-form" class="form">
+    <fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Your party</legend><div class="toggle-row">${S.friends.filter(u => MAIN_IDS.includes(u.id)).map(u => `<label><input type="checkbox" name="friends" value="${esc(u.id)}" ${chosen.has(u.id) ? 'checked' : ''}><span>${av(u, 28)}${first(u)}</span></label>`).join('')}</div></fieldset>
+    <label class="lbl">What’s the occasion?<input class="input" name="title" value="${esc(draft.title || 'Saturday night')}" maxlength="80" required></label>
+    <div class="two"><label class="lbl">Day<input class="input" name="date" type="date" value="${esc(r.date || S.defaultDate)}" required></label><label class="lbl">Starting time<input class="input" name="time" type="time" value="${esc(r.time || '19:00')}" required></label></div>
+    <label class="lbl">Proposed spend per person ($)<input class="input" name="allowance" type="number" min="0" max="10000" value="24" required></label>
+    <label class="lbl">After dinner (optional)<select class="select" name="activityId"><option value="">Keep it to dinner</option>${(S.activities || []).map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label>
+    ${r.placeId ? `<p class="meta">Starting with the spot you picked.</p>` : ''}
+    ${lockNote('Each friend’s budget and calendar stay with their own agent.')}<button class="btn primary lg">Round them up</button></form></main>`;
+}
+
+/* 13 · Friends */
+function friendsScreen() {
+  const q = String(drafts['friend-q'] || '').toLowerCase(), list = S.friends.filter(u => !q || u.name.toLowerCase().includes(q));
+  return `${titlebar(`Friends <span class="count">${S.friends.length}</span>`, { right: `<button class="pill primary h44 shadow" data-action="addfriends">${I.plus}Add friends</button>` })}
+  <main class="content" data-scroll>
+    ${S.requests.length ? `<section class="card pad sh-4 col gap-10"><h2 class="eyebrow">Requests</h2>${sticker(`${S.requests.length} new`, 'coral')}${S.requests.map(r => `<div class="row gap-10">${av(r.fromUser, 38)}<span class="grow stack"><span class="body-15 strong">${esc(r.fromUser.name)}</span><span class="meta-12">${r.mutual.length ? `Friends with ${esc(names(r.mutual))}` : 'Wants to be friends'}</span></span><button class="pill primary h36" data-action="friend-accept" data-id="${esc(r.from)}">Accept</button><button class="icon-circle" style="width:36px;height:36px" data-action="friend-decline" data-id="${esc(r.from)}" aria-label="Decline ${esc(r.fromUser.name)}">${I.x}</button></div>`).join('')}</section>` : ''}
+    <div class="search">${I.search('#5E5873')}<label class="sr-only" for="friend-q">Search your friends</label><input id="friend-q" placeholder="Search your friends" autocomplete="off" value="${esc(drafts['friend-q'] || '')}"></div>
+    <ul class="stack gap-8" aria-label="Your friends">${list.map(u => `<li class="card row-pad row gap-10">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.ratings} rating${u.ratings === 1 ? '' : 's'} · ${u.adventures} adventure${u.adventures === 1 ? '' : 's'} together${u.fictional ? ' · demo person' : ''}</span></span>${MAIN_IDS.includes(u.id) ? `<button class="pill" data-action="plan-friend" data-id="${esc(u.id)}">Plan</button>` : ''}</li>`).join('') || '<li class="meta">No friends match that.</li>'}</ul>
+  </main>${tabbar(rootTab())}`;
+}
+
+/* 14 · Add friends */
+function addFriendsScreen(r) {
+  const q = String(drafts['people-q'] || '').toLowerCase(), match = u => !q || u.name.toLowerCase().includes(q) || u.id.toLowerCase().includes(q);
+  const known = S.people.filter(u => u.mutual.length && match(u)).slice(0, 6), more = S.people.filter(u => !u.mutual.length && match(u)).slice(0, q ? 12 : 4);
+  const row = u => `<div class="card row-pad row gap-10">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.mutual.length ? `Friends with ${esc(names(u.mutual))}` : `On disco · ${u.ratings} rating${u.ratings === 1 ? '' : 's'}`}</span></span>${S.sent.includes(u.id) ? '<span class="pill requested">Requested</span>' : `<button class="pill primary pad-14" data-action="friend-add" data-id="${esc(u.id)}">Add</button>`}</div>`;
+  const link = `${location.origin}/?invite=${encodeURIComponent(S.me.id)}`;
+  return `${titlebar('Add friends', { back: true })}<main class="content gap-16" data-scroll>
+    <div class="search">${I.search('#5E5873')}<label class="sr-only" for="people-q">Search by name or username</label><input id="people-q" placeholder="Search by name or username" autocomplete="off" value="${esc(drafts['people-q'] || '')}"></div>
+    <section class="card purple sh-4 col gap-10" style="padding:14px"><h2 class="h-19">Bring your crew</h2><p class="body-14">Share your link or QR code so friends can find you on Disco.</p>
+      <div class="row gap-8"><button class="btn h44" data-action="share-link" data-link="${esc(link)}">${I.share}Share invite link</button><button class="btn h44" data-action="toggle-qr" aria-expanded="${ui.qr}">${I.qr}${ui.qr ? 'Hide QR code' : 'Show QR code'}</button></div>
+      ${ui.qr ? `<div class="qr">${qrSvg(link)}</div><p class="meta-12 center" style="color:var(--ink)">${esc(link)}</p>` : ''}</section>
+    ${known.length ? `<section class="stack gap-8"><h2 class="eyebrow">People you may know</h2>${known.map(row).join('')}</section>` : ''}
+    <section class="stack gap-8"><h2 class="eyebrow">${q ? 'On disco' : 'More people on disco'}</h2>${more.map(row).join('') || '<p class="meta">No one matches that yet.</p>'}</section>
+    ${r.onboarding ? `<button class="btn primary lg" data-action="finish-onboarding">Done, take me to chat</button>` : ''}</main>`;
+}
+
+/* 15 · Welcome / 16 · Quick rate */
+const IMPORTS = [['music', 'Music you listen to', 'Connect your music app', '#B79CFF', 'music'], ['places', 'Places you’ve saved', 'Import saved spots from your maps app', '#FF6F59', 'pin'], ['shows', 'Movies and shows', 'Connect your streaming app', '#FFD666', 'play']];
+function welcomeScreen() {
+  return `<main class="onboard" data-scroll><div class="progress" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
+    <div><div class="row gap-12">${ball(66)}<div><p class="wordmark" style="font-size:44px;line-height:46px">Disco</p><p class="eyebrow muted" style="letter-spacing:.08em;margin-top:6px">Stress less, party more</p></div></div>
+      <h1 class="title t30" style="margin-top:14px">First, show us your taste.</h1><p class="body-15 muted" style="margin-top:8px">Bring in what you already love so your friends’ picks make sense on day one. Takes about a minute.</p></div>
+    <section aria-label="Import" class="stack gap-10">${IMPORTS.map(([key, title, sub, color, icon]) => { const on = ui.imports[key]; return `<button class="import ${on ? 'on' : ''}" data-action="import" data-value="${key}" aria-pressed="${!!on}"><span class="ic" style="background:${color}">${I[icon]}</span><span class="grow stack"><span class="body-15 strong">${title}</span>${on ? '<span class="meta-12 strong green-ink">Demo connection · nothing imported</span>' : `<span class="meta-12">${sub}</span>`}</span>${on ? I.check : '<span class="strong" style="font-size:13px">Connect</span>'}</button>`; }).join('')}</section>
+    <div class="divider-or"><span></span>or<span></span></div>
+    <button class="card col gap-2" style="padding:14px 16px" data-action="quickrate">${sticker('1 min', 'yellow', 4, 'padding:2px 9px')}<span class="h-18">Rate 10 Columbus spots</span><span class="meta">Quick taps: loved it, fine, or never been</span></button>
+    <div class="stack gap-10 mt-auto"><button class="btn primary lg" data-action="quickrate">Continue</button><p class="meta center">Next: find your friends · <button class="link" style="font-size:13px" data-action="welcome-skip">Skip for now</button></p></div></main>`;
+}
+function quickRateScreen() {
+  const q = ui.quick;
+  if (!q) return `<main class="onboard" data-scroll><p class="meta">Finding popular spots…</p></main>`;
+  const pick = q.picks[q.i];
+  if (!pick) return `<main class="onboard" data-scroll><p class="meta">Saving your picks…</p></main>`;
+  const p = pick.place;
+  return `<main class="onboard g20" data-scroll><div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span></span></div>
+    <div class="row between" style="align-items:flex-end"><h1 class="title t30">Been here?</h1><p class="h-18" style="font-weight:800">${q.i + 1}<span class="muted"> / ${q.picks.length}</span></p></div>
+    <div class="deck"><div class="behind" aria-hidden="true"></div><article class="card r18 sh-5">${photo(p, 'height:200px;border-radius:12px', '', false)}
+      <div class="row gap-8"><h2 class="h-24">${esc(p.name)}</h2>${tagPill(p)}</div><p class="meta">${meta([p.area, price(p)])}</p>
+      <p class="row gap-8 meta" style="color:var(--ink);font-weight:600">${pick.reviewers.length ? `${avStack(pick.reviewers, 22, -6)}Popular with people you know` : 'Popular in Columbus'}</p></article></div>
+    <div class="stack gap-10"><div class="row gap-8">${[['loved', 'Loved it'], ['fine', 'It was fine'], ['not', 'Not for me']].map(([v, l], i) => `<button class="btn lg ${i === 0 ? 'primary' : ''}" style="font-size:15px" data-action="quick" data-value="${v}">${l}</button>`).join('')}</div>
+      <div class="row gap-8"><button class="btn dashed sm-text" data-action="quick" data-value="never">Never been</button><button class="btn dashed sm-text" data-action="quick" data-value="want">${I.bookmark(false)}Want to try</button></div></div>
+    <p class="meta center" style="margin-top:auto">Quick picks become rough ratings you can fine-tune later. <button class="link" style="font-size:13px" data-action="quick-skip">Skip to friends</button></p></main>`;
+}
+
+/* 18 · Rate the night */
+function rateScreen(p) {
+  const list = stops(p.option), st = ui.nights[p.id] || (ui.nights[p.id] = {}), next = new Date(`${p.option.date}T12:00:00`); next.setDate(next.getDate() + 1);
+  const dayAfter = next.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase();
+  const mine = Object.fromEntries(p.nightRatings.filter(r => isMe(r.author)).map(r => [r.placeId, r.rating]));
+  const card = (s, i) => {
+    const val = st[s.place.id] ?? mine[s.place.id], others = p.nightRatings.filter(r => r.placeId === s.place.id && !isMe(r.author));
+    const head = `<div class="row between gap-10"><div><p class="meta-12">${t12(s.time, false)} · ${esc(group(s.place) === 'Eat & Drink' ? typeTag(s.place)[0] : group(s.place))}</p><h2 class="body-15 strong" style="font-size:17px;line-height:22px">${esc(s.place.name)}</h2></div><span id="night-bubble-${i}">${score(val ?? null, '', 'Your rating')}</span></div>`;
+    const control = val == null ? `<div class="row gap-8">${[['9', 'Loved it'], ['7', 'It was fine'], ['4.5', 'Not for me']].map(([v, l]) => `<button class="btn h40" data-action="night-quick" data-id="${esc(p.id)}" data-place="${esc(s.place.id)}" data-value="${v}">${l}</button>`).join('')}</div>`
+      : `${slider(`night-${i}`, val, `Your rating for ${s.place.name}`, `night-bubble-${i}`).replace('data-slider', `data-slider data-night="${esc(p.id)}" data-place="${esc(s.place.id)}"`)}`;
+    return `<article class="card pad ${i === 0 ? 'sh-4' : ''} col gap-10">${head}${control}${others.map(r => `<p class="row gap-8" style="font-size:13px;line-height:18px">${av(r.author, 22)}${first(r.author)} gave it ${r.rating.toFixed(1)} <span class="quote q-19">“${esc(r.quote.length > 40 ? r.quote.slice(0, 38) + '…' : r.quote)}”</span></p>`).join('')}</article>`;
+  };
+  const saves = p.stopSaves[list[0].place.id] || 0;
+  return `${titlebar(`How was ${esc(p.title)}?`, { close: true, size: 't30' }).replace('<h1', `<p class="eyebrow">${dayAfter} · The morning after</p><h1`)}
+  <main class="content pad-flush" data-scroll>${list.map(card).join('')}
+    <section class="stack gap-8"><label for="night-note" class="field-label s18">The night in one line</label><textarea id="night-note" class="textarea hand" style="height:70px;padding:8px 14px" maxlength="300" placeholder="Patio, then laughing till midnight.">${esc(drafts['night-note'] || '')}</textarea></section>
+    <section class="note-box">${I.loop}<p><span class="strong">Your ratings make the next plan better.</span> ${saves ? `${saves} friend${saves > 1 ? 's have' : ' has'} ${esc(list[0].place.name)} on their Want to try list.` : 'They show up in your friends’ feeds and picks.'}</p></section><div style="height:6px"></div></main>
+  <footer class="footbar col"><button class="btn primary lg" data-action="post-night" data-id="${esc(p.id)}">Post to friends</button></footer>`;
+}
+
+/* Facts */
+function factsScreen(r) {
+  const facts = r.planId ? findPlan(r.planId)?.facts : r.data;
+  return `${titlebar('Venue details', { size: 't30' })}<main class="content" data-scroll>${!facts ? `<div class="thinking"><i></i><i></i><i></i><span>Checking hours, prices and menu options…</span></div>`
+    : `${sticker(facts.status === 'sourced' ? 'Sources found' : 'Not verified', facts.status === 'sourced' ? 'green static' : 'yellow static', -2)}<p class="facts-summary">${esc(facts.summary || 'No live details yet.')}</p>${facts.checkedAt ? `<p class="meta">Checked ${new Date(facts.checkedAt).toLocaleTimeString()}</p>` : ''}
+    <div class="source-list">${(facts.sources || []).map(s => `<a class="link" href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a>`).join('')}</div>${facts.searchSuggestions ? `<iframe class="search-suggestions" title="Google Search suggestions" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(facts.searchSuggestions)}"></iframe>` : ''}`}</main>`;
+}
+
+/* Login */
 async function loginScreen() {
   const accounts = await api('/accounts');
-  $('#app').innerHTML = `<main class="login"><a class="brand" href="/">Disco<span class="spark">✳</span></a><div class="login-illustration"><div class="orbit"></div><div class="disco-ball">✳</div>${accounts.map((u, i) => `<div class="orbit-person p${i}">${avatar(u)}</div>`).join('')}</div><p class="eyebrow">YOUR PEOPLE. YOUR PLANS.</p><h1>Good plans.<br>Better company.</h1><p class="muted">Your friends have great taste.<br>Your agent brings it all together.</p><form id="login-form" class="stack"><label>Your account<select name="username">${accounts.map(u => `<option value="${u.id}" ${slot === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label><label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required></label><button class="btn primary wide" type="submit">Let’s get together ${icon('arrow')}</button><p class="tiny muted">Prepared demo accounts · Password: <strong>disco2026</strong><br>Use your team’s password if it was changed.</p></form><p class="login-foot">Stress less, party more.</p></main>`;
+  $('#app').innerHTML = `<main class="login"><div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div><div class="row gap-12">${ball(66)}<div><p class="wordmark" style="font-size:44px;line-height:46px">Disco</p><p class="eyebrow muted" style="letter-spacing:.08em;margin-top:6px">Stress less, party more</p></div></div>
+    <h1 class="title t30">Your friends’ picks, turned into plans.</h1><p class="body-15 muted">Ask for anything your friends vouch for. Pick your people, and your agents work out the rest.</p>
+    <form id="login-form" class="card r16 pad-16 sh-4 form"><fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Who are you?</legend><div class="toggle-row">${accounts.map((u, i) => `<label><input type="radio" name="username" value="${esc(u.id)}" ${(slot === u.id || (!MAIN_IDS.includes(slot) && i === 0)) ? 'checked' : ''}><span>${av(u, 28)}${esc(u.name)}</span></label>`).join('')}</div></fieldset>
+      <label class="lbl">Password<input class="input" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required></label><button class="btn primary lg" type="submit">Let’s go</button></form>
+    <p class="meta center">Prepared demo accounts · Password: <strong>disco2026</strong> unless your team changed it.</p></main>`;
 }
-function shell() {
-  $('#app').innerHTML = `<div class="app-shell"><header id="topbar"></header><main id="main"></main><div id="composer"></div><nav id="nav" aria-label="Main navigation"></nav></div><div id="modal-root"></div>`;
-}
+
+/* ---------- Render ---------- */
 function render() {
   if (!S) return;
-  if (!$('#main')) shell();
-  const scroll = $('#main').scrollTop;
-  $('#topbar').innerHTML = `<button class="brand brand-button" data-action="nav" data-view="chat">Disco<span class="spark">✳</span></button><div class="header-right"><span class="live-dot" title="Live updates connected"></span><button class="avatar-button" data-action="nav" data-view="you" aria-label="Your profile">${avatar(S.me, true)}</button></div>`;
-  $('#nav').innerHTML = ['chat', 'feed', 'adventures', 'you'].map(v => `<button class="nav-item ${view === v ? 'active' : ''}" data-action="nav" data-view="${v}" ${view === v ? 'aria-current="page"' : ''}>${icon(v)}<span>${v === 'you' ? 'You' : v[0].toUpperCase() + v.slice(1)}</span>${v === 'adventures' && S.plans.some(p => p.state === 'invited' && p.myRsvp !== 'in' || p.isHost && p.state === 'awaiting_approval') ? '<i class="notification-dot"></i>' : ''}</button>`).join('');
-  $('#main').innerHTML = view === 'chat' ? chatView() : view === 'feed' ? feedView() : view === 'adventures' ? adventuresView() : profileView();
-  if (view === 'adventures' && S.matches?.length) $('#main .page-title').insertAdjacentHTML('afterend', sharedMatches());
-  if (view === 'feed') $('#main .filter-row')?.insertAdjacentHTML('beforeend', button('Movies & TV', 'filter', 'chip ' + (filter === 'Movies & TV' ? 'active' : ''), 'data-filter="Movies & TV"'));
-  $('#main').scrollTop = scroll;
-  if (view === 'chat') {
-    if (!$('#chat-form')) $('#composer').innerHTML = `<form id="chat-form" class="composer"><label class="sr-only" for="message">Message your agent</label><textarea id="message" name="message" rows="1" placeholder="Ask your agent anything…" maxlength="2000">${esc(chatDraft)}</textarea><button class="send-button" type="submit" aria-label="Send message">${icon('send')}</button></form><div class="privacy-line">${icon('lock')} Your agent, your private space <span>• ${S.provider.provider === 'local' ? 'Local demo' : esc(S.provider.provider)}</span></div>`;
-    $('#chat-form button').disabled = pending;
-  } else $('#composer').innerHTML = '';
-  drawModal();
+  const r = cur(), key = routeKey(r), prev = $('[data-scroll]');
+  if (prev && lastKey) scrolls[lastKey] = prev.scrollTop;
+  const active = document.activeElement, focusId = active?.id && active !== document.body ? active.id : null;
+  const selection = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+  let html; try { html = screen(r); } catch (error) { console.error(error); html = `${titlebar('Something went wrong')}<main class="content"><p class="body-15">${esc(error.message)}</p></main>`; }
+  $('#app').innerHTML = `<div class="app-shell">${html.includes('class="screen') ? html : `<div class="screen">${html}</div>`}</div>`;
+  const main = $('[data-scroll]');
+  if (main) {
+    const grew = r.name === 'chat' && (S.chat.length !== lastChatLen || pending);
+    main.scrollTop = grew ? main.scrollHeight : scrolls[key] || 0;
+    if (r.name === 'chat') lastChatLen = S.chat.length;
+  }
+  if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); if (selection) try { el.setSelectionRange(...selection); } catch { /* Not a text field. */ } } }
+  else if (key !== lastKey && lastKey) { const h = $('h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } }
+  lastKey = key;
 }
 
-function recCard(rec, index = 0, compact = false) {
-  const isVenue = !['Music', 'Movies & TV', 'Books', 'Products'].includes(rec.place.category);
-  const canPlan = /food|restaurant|cafe|tea|bar|pizza|brunch|coffee|bakery/i.test(rec.place.category);
-  const hours = rec.facts?.open === true ? 'Open at checked time' : rec.facts?.open === false ? 'Closed at checked time' : 'Hours unverified';
-  return `<article class="pick-card ${compact ? 'compact' : ''}">
-    <button class="art-button" data-action="place" data-id="${esc(rec.place.id)}" aria-label="View ${esc(rec.place.name)}">
-      ${art(rec.place.category + ' ' + rec.place.name, index)}<span class="image-badge">${icon('users')} Vouched ×${rec.votes}</span>
-    </button>
-    <div class="pick-body">
-      <div class="row"><div><p class="eyebrow">${esc(rec.place.category)}${rec.place.area ? ' · ' + esc(rec.place.area) : ''}</p><button class="text-button place-name" data-action="place" data-id="${esc(rec.place.id)}">${esc(rec.place.name)}</button></div><span class="score">${rec.score.toFixed(1)}</span></div>
-      ${rec.reviews[0] ? `<blockquote>“${esc(rec.reviews[0].quote)}”</blockquote><div class="row small-gap"><div class="avatar-stack">${rec.reviews.map(r => avatar(r.author, true)).join('')}</div><span class="tiny">${esc(rec.reason)}</span></div>` : ''}
-      ${rec.change ? `<p class="ranking-change">${icon('sparkle')} ${esc(rec.change)}</p>` : ''}
-      ${isVenue ? `<div class="card-facts"><span>${icon('pin')} ${rec.place.distance != null ? `${(rec.place.distance * .621371).toFixed(1)} mi from OSU` : esc(rec.place.area)}</span><span>${icon('clock')} ${hours}</span></div>` : ''}
-      ${rec.facts ? `<p class="tiny muted mt">Checked for ${esc(prettyDate(rec.facts.date))}, ${esc(prettyTime(rec.facts.time))} · ${rec.facts.sources?.length || 0} sources</p>` : ''}
-      ${rec.unmatched.length ? `<p class="unmatched">${esc(rec.unmatched.join(' · '))}</p>` : ''}
-      <div class="row card-actions">${canPlan ? button('Plan this ' + icon('arrow'), 'new-plan', 'primary small-btn', `data-place="${esc(rec.place.id)}"`) : button('See opinions ' + icon('arrow'), 'place', 'primary small-btn', `data-id="${esc(rec.place.id)}"`)}${button(icon('save'), 'save', 'icon-button ' + (rec.saved ? 'selected' : ''), `data-id="${esc(rec.place.id)}" aria-label="${rec.saved ? 'Remove from' : 'Add to'} want to try"`)}</div>
-    </div></article>`;
+/* ---------- Actions ---------- */
+async function sendChat(text, planId) {
+  pending = true; render();
+  try { await api('/chat', { text, planId }); delete drafts.message; await refresh(); } finally { pending = false; render(); }
 }
-function sharedMatches() {
-  return S.matches.map(m => `<div class="match-card"><span class="eyebrow">IT’S A MATCH</span><h3>${esc(m.place.name)}</h3><p>You and ${m.friends.map(u => esc(u.name)).join(', ')} want to try this.</p>${button('Make it a plan ' + icon('arrow'), 'match-plan', 'primary small-btn', `data-id="${esc(m.place.id)}"`)}</div>`).join('');
+async function createPlan(body) { const { planId } = await api('/plans', body); await refresh(); replaceOrGo('working', { id: planId }); }
+function replaceOrGo(name, params) { if (['newplan', 'change'].includes(cur().name)) replace(name, params); else go(name, params); }
+async function finishQuick() {
+  const answers = ui.quick?.answers || []; ui.quick = null;
+  await api('/onboard', { answers }); await refresh(); stack = [{ name: 'chat' }, { name: 'addfriends', onboarding: true }]; render();
+  const rated = answers.filter(a => ['loved', 'fine', 'not'].includes(a.answer)).length;
+  if (rated) toast(`${rated} rough rating${rated > 1 ? 's' : ''} saved. Fine-tune them anytime.`);
 }
-function chatView() {
-  const pendingPlan = S.plans.find(p => p.state !== 'cancelled' && p.state !== 'booked');
-  return `<div class="page chat-page">${!S.me.onboarded ? `<div class="welcome-note"><div class="row"><strong>An agent that grows with you.</strong>${button(icon('close'), 'onboard', 'icon-button tiny-button', 'aria-label="Dismiss introduction"')}</div><p>Tell me your taste and constraints. I’ll ask before saving a long-term memory. Ask what I remember—or tell me to forget—anytime.</p></div>` : ''}${S.chat.length === 0 ? `<div class="greeting"><p class="eyebrow">A LITTLE LESS “WHAT’S THE PLAN?”</p><h1>Hey ${esc(S.me.name)}.<br>Let’s make <span>something happen.</span></h1><p class="muted">Good taste runs in your friend group.</p></div><div class="prompt-grid">${button('Find a dinner spot ' + icon('arrow'), 'prompt', 'prompt', 'data-text="Find restaurants my friends love"')}${button('Round up my crew ' + icon('users'), 'new-plan', 'prompt lavender')}</div><div class="section-heading"><h2>Your circle’s good taste</h2><span class="tiny muted">Columbus, OH</span></div>${S.recommendations.map((r, i) => recCard(r, i, i > 0)).join('')}${!S.recommendations.length ? empty('The good stuff starts with you.', 'Log a restaurant opinion to get started.') : ''}` : `<div class="conversation">${S.chat.map(messageView).join('')}${pending ? `<div class="agent-message"><span class="agent-mark">✳</span><div class="thinking"><i></i><i></i><i></i><span>Working on it…</span></div></div>` : ''}</div>`}${pendingPlan && S.chat.length === 0 ? planCard(pendingPlan) : ''}<p class="data-note">Seeded opinions are fictional demo data. Venue artwork is illustrative.</p></div>`;
+function updateSlider(input) {
+  const v = Number(input.value), box = input.closest('.slider'), bubble = document.getElementById(input.dataset.bubble);
+  box.style.setProperty('--c', scoreColor(v)); box.querySelector('.fill').style.width = `calc(${v * 10}% + 12px)`; box.querySelector('.thumb').style.left = `${v * 10}%`;
+  const target = bubble?.classList.contains('score') ? bubble : bubble?.querySelector('.score');
+  if (target) { target.textContent = v.toFixed(1); target.className = target.className.replace(/\b(hi|mid|lo|empty)\b/g, '').trim() + ' ' + scoreCls(v); }
+  if (input.id === 'rating') { const p = cur().data; if (p) ui.logs[p.id].rating = v; }
+  if (input.dataset.night) (ui.nights[input.dataset.night] ||= {})[input.dataset.place] = v;
 }
-function messageView(m) {
-  if (m.role === 'user') return `<div class="user-message">${esc(m.text)}</div>`;
-  let attachment = '';
-  if (m.kind === 'plan') { const p = S.plans.find(p => p.id === m.planId); if (p) attachment = planCard(p); }
-  if (m.kind === 'recommendations') attachment = (m.picks || S.recommendations).map((r, i) => recCard(r, i, i > 0)).join('');
-  if (m.kind === 'planDraft') attachment = button('Choose friends & start ' + icon('arrow'), 'new-plan', 'primary', `data-draft="${esc(m.id)}"`);
-  if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) attachment = `<div class="memory-card"><span class="eyebrow">YOUR CALL, ALWAYS</span><div class="row">${button('Save to memory', 'memory-save', 'primary small-btn')}${button('Just this time', 'memory-skip', 'small-btn')}</div></div>`;
-  if (m.kind === 'memories') attachment = S.me.private.memories.map(mem => `<div class="memory-item"><p>${esc(mem.text)}</p>${button('Forget', 'forget', 'small-btn', `data-id="${mem.id}"`)}</div>`).join('');
-  return `<div class="agent-message"><span class="agent-mark">✳</span><div class="agent-content"><p>${esc(m.text)}</p>${attachment}</div></div>`;
-}
-function categoryMatch(p, category) { const c = (p?.category || '').toLowerCase(); return category === 'All' || category === 'Eat & drink' && /food|restaurant|bar|cafe|coffee|brunch|bakery|pizza|tea/.test(c) || category === 'Places' && !/music|movie|book|product/.test(c) || c.includes(category.toLowerCase()); }
-function feedView() {
-  const reviews = S.feed.filter(r => categoryMatch(r.place, filter));
-  return `<div class="page"><div class="page-title"><div><p class="eyebrow">GOOD TASTE IS CONTAGIOUS</p><h1>In your circle</h1></div>${button(icon('users'), 'friends', 'icon-button', 'aria-label="Friends"')}</div><div class="filter-row">${['All', 'Eat & drink', 'Places', 'Music', 'Books', 'Products'].map(f => button(esc(f), 'filter', 'chip ' + (f === filter ? 'active' : ''), `data-filter="${f}"`)).join('')}</div>${button(icon('plus') + ' Log something you loved', 'catalog', 'wide dashed', 'data-purpose="review"')}<div class="feed-list">${reviews.map(r => `<article class="feed-card"><div class="row"><div class="row small-gap">${avatar(r.author, true)}<div><strong>${esc(r.author.name)}</strong><p class="tiny muted">${r.synthetic ? 'Seeded demo opinion' : 'Shared an opinion'}</p></div></div><span class="score small-score">${r.rating.toFixed(1)}</span></div><button class="text-button feed-place" data-action="place" data-id="${esc(r.placeId)}">${esc(r.place?.name)}</button><p class="eyebrow">${esc(r.place?.category)} · ${esc(r.place?.area)}</p><blockquote>“${esc(r.quote)}”</blockquote><div class="tag-row">${r.tags.filter(t => !['positive', 'mixed', 'negative'].includes(t)).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div><div class="row feed-actions">${button(icon('heart') + ` ${r.likes.length || ''}`, 'like', 'icon-button ' + (r.likes.includes(S.me.id) ? 'selected' : ''), `data-id="${r.id}" aria-label="Like opinion"`)}${button(icon('save') + ' Want to try', 'save', 'text-button', `data-id="${esc(r.placeId)}"`)}</div></article>`).join('') || empty('Nothing here yet.', 'Add the first opinion in this category.')}<p class="data-note">Fictional seeded opinions are labeled. New opinions update rankings live.</p></div></div>`;
-}
-function planCard(p) {
-  return `<button class="plan-card" data-action="plan" data-id="${p.id}"><div class="plan-date"><span>${new Date(p.option.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' })}</span><strong>${new Date(p.option.date + 'T12:00:00').getDate()}</strong></div><div class="plan-card-body"><span class="status ${p.state}">${statusText[p.state]}</span><h3>${esc(p.title)}</h3><p>${esc(p.option.place.name)} · ${prettyTime(p.option.time)}</p><div class="avatar-stack">${p.participants.map(u => avatar(u, true)).join('')}</div></div>${icon('arrow')}</button>`;
-}
-function adventuresView() {
-  return `<div class="page"><div class="page-title"><div><p class="eyebrow">LESS PLANNING, MORE LIVING</p><h1>Adventures</h1></div>${button(icon('plus'), 'new-plan', 'icon-button primary', 'aria-label="New plan"')}</div>${S.plans.length ? `<p class="section-label">YOUR PLANS</p>${S.plans.map(planCard).join('')}` : `<div class="empty-art">✳</div>${empty('The group chat could never.', 'Pick your people. Let your agents handle the back-and-forth.')}${button('Start an adventure ' + icon('arrow'), 'new-plan', 'primary wide')}`}<div class="callout"><span class="agent-mark">✳</span><div><strong>You make the social decisions.</strong><p>Your agent handles the logistics. Every plan and change comes back for approval.</p></div></div></div>`;
-}
-function profileView() {
-  return `<div class="page"><div class="profile-hero">${avatar(S.me)}<h1>${esc(S.me.name)}</h1><p>${esc(S.me.area)} · Your kind of good time</p><div class="profile-stats"><div><strong>${S.myReviews.length}</strong><span>Reviewed</span></div><div><strong>${S.me.saved.length}</strong><span>Want to try</span></div><button data-action="friends"><strong>${S.friends.length}</strong><span>Friends</span></button><div><strong>${S.plans.length}</strong><span>Adventures</span></div></div></div><div class="section-heading"><h2>Just between us</h2>${icon('lock')}</div><p class="muted small-text">Only you and your agent can read these settings.</p><div class="settings-summary"><div><span>Usual budget</span><strong>$${S.me.private.budget}</strong></div><div><span>Available</span><strong>${prettyTime(S.me.private.start)}–${prettyTime(S.me.private.end)}</strong></div><div><span>Food preferences</span><strong>${esc(S.me.private.dietary || 'Not set')}</strong></div></div>${button('Edit private preferences', 'settings', 'wide')}<button class="memory-link" data-action="prompt" data-text="What do you remember about me?">${icon('sparkle')} What does my agent remember? ${icon('arrow')}</button>${Object.keys(S.me.temporary).length ? `<div class="callout"><div><strong>Current conversation preferences are active.</strong><p>These are separate from your saved settings.</p>${button('Clear temporary preferences', 'clear-temporary', 'small-btn')}</div></div>` : ''}<div class="section-heading"><h2>Want to try</h2><span class="tiny muted">${S.savedPlaces.length} saved</span></div>${S.savedPlaces.map(p => `<button class="list-item" data-action="place" data-id="${esc(p.id)}"><span class="mini-art">${icon('pin')}</span><div><strong>${esc(p.name)}</strong><p>${esc(p.category)}</p></div>${icon('arrow')}</button>`).join('') || '<p class="muted small-text">Save a friend’s pick and it’ll be right here.</p>'}<div class="section-heading"><h2>Your opinions</h2>${button(icon('plus'), 'catalog', 'icon-button', 'data-purpose="review" aria-label="Add opinion"')}</div>${S.myReviews.map(r => `<button class="list-item" data-action="review" data-id="${esc(r.placeId)}"><div><strong>${esc(r.place?.name)}</strong><p>${esc(r.quote)}</p></div><span class="score small-score">${r.rating.toFixed(1)}</span></button>`).join('')}<div class="profile-footer"><span class="tiny muted">${esc(S.provider.provider)} agent · Seeded demo network</span>${button('Log out', 'logout', 'text-button')}</div></div>`;
-}
-function empty(title, text) { return `<div class="empty"><h2>${title}</h2><p>${text}</p></div>`; }
-function openModal(next) { if (!modal) returnFocus = document.activeElement; modal = next; modalKey = ''; drawModal(); }
-function closeModal() { modal = null; modalKey = ''; if ($('#modal-root')) $('#modal-root').innerHTML = ''; if (returnFocus?.isConnected) returnFocus.focus(); }
-function modalFrame(title, body, cls = '') { return `<div class="modal-backdrop"><section class="modal ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="modal-header"><h2>${esc(title)}</h2>${button(icon('close'), 'close', 'icon-button', 'aria-label="Close dialog"')}</header><div class="modal-content">${body}</div></section></div>`; }
-function drawModal() {
-  if (!modal) { $('#modal-root').innerHTML = ''; modalKey = ''; return; }
-  const key = `${modal.type}:${modal.id || ''}`;
-  if (modalKey === key && !['plan'].includes(modal.type)) return;
-  const sameModal = modalKey === key;
-  const scroll = sameModal ? $('.modal-content')?.scrollTop || 0 : 0;
-  const openDetails = sameModal ? [...document.querySelectorAll('.modal-content details[open]')].map(d => d.className) : [];
-  modalKey = key;
-  let content = '';
-  if (modal.type === 'plan') { const p = S.plans.find(p => p.id === modal.id); content = p ? modalFrame('Your adventure', planDetail(p)) : modalFrame('Adventure', '<p>Waiting for this plan…</p>'); }
-  if (modal.type === 'new-plan') content = modalFrame('Round up your crew', planForm());
-  if (modal.type === 'settings') content = modalFrame('Your private preferences', settingsForm());
-  if (modal.type === 'catalog') content = modalFrame('Find something good', `<div class="search-box">${icon('search')}<input id="catalog-query" placeholder="Search restaurants, cafés, books…" aria-label="Search items" autocomplete="off"></div><div id="catalog-results"><p class="muted">Loading your places…</p></div>${button(icon('plus') + ' Add another item', 'add-item', 'wide dashed')}`);
-  if (modal.type === 'review') content = modalFrame('Log it', reviewForm());
-  if (modal.type === 'place') content = modalFrame(modal.place.name, placeDetail(modal.place));
-  if (modal.type === 'facts') content = modalFrame('A quick fact check', factsView(modal.facts));
-  if (modal.type === 'friends') content = modalFrame('Your people', friendsView());
-  if (modal.type === 'change') content = modalFrame('Tell your agent', changeForm());
-  if (modal.type === 'tweak') content = modalFrame('Change the proposal', tweakForm());
-  if (modal.type === 'add-item') content = modalFrame('Add to your taste', `<form id="item-form" class="stack"><label>Name<input name="name" required maxlength="100" placeholder="A book, album, film, product…"></label><label>Category<select name="category">${['Music', 'Movies & TV', 'Books', 'Products', 'Places'].map(c => `<option>${c}</option>`).join('')}</select></label><button class="btn primary" type="submit">Next: your opinion ${icon('arrow')}</button></form>`);
-  $('#modal-root').innerHTML = content;
-  if (modal.type === 'review') $('.modal input[type="range"]')?.setAttribute('aria-label', 'Your rating');
-  if (modal.type === 'plan') {
-    const primary = $('.modal [data-action="approve"], .modal [data-action="rsvp-in"]');
-    if (primary) { const group = primary.dataset.action === 'rsvp-in' ? primary.parentElement : primary; group.classList.add('primary-shortcut'); $('.modal .route-card')?.insertAdjacentElement('afterend', group); }
-    const plan = S.plans.find(p => p.id === modal.id);
-    if (plan?.myRsvp === 'reconfirm' && primary) primary.innerHTML = 'Reconfirm ' + icon('check');
-    if (plan && ['invited', 'confirmed', 'booked'].includes(plan.state) && $('.modal .diff .tiny')) $('.modal .diff .tiny').textContent = 'The host approved this update.';
-    if (plan?.why?.length) $('.modal .route-card')?.insertAdjacentHTML('afterend', `<div class="plan-why"><span class="eyebrow">WHY THIS ONE</span><p>“${esc(plan.why[0].quote)}”</p><span>${esc(plan.why[0].author)}${plan.why[0].synthetic ? ' · demo opinion' : ''}</span></div>`);
-    if (plan?.option.activity) {
-      const [hour, minute] = plan.option.time.split(':').map(Number), activityTime = `${String(hour + 1).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-      $('.modal .route-card')?.insertAdjacentHTML('afterend', `<div class="route-card secondary-stop"><div class="route-marker">${icon('adventures')}</div><div><span class="eyebrow">${prettyTime(activityTime)} · NEXT STOP</span><h2>${esc(plan.option.activity.name)}</h2><p>${esc(plan.option.activity.area)}</p><p class="tiny muted">One hour planned. Verify travel time and admission costs.</p></div></div>`);
-    }
-    if (plan?.previous && plan.previous.activity?.id !== plan.option.activity?.id) $('.modal .plan-heading')?.insertAdjacentHTML('afterend', `<div class="diff"><strong>Second stop changed</strong><p>${esc(plan.previous.activity?.name || 'None')} → ${esc(plan.option.activity?.name || 'None')}</p></div>`);
-    if (plan?.state === 'booked') $('.modal .booking')?.insertAdjacentHTML('beforeend', button('Rate the night', 'review', 'primary wide mt', `data-id="${esc(plan.option.place.id)}"`));
-  }
-  if (['new-plan', 'tweak'].includes(modal.type)) {
-    const form = $('#plan-form') || $('#tweak-form'), current = S.plans.find(p => p.id === modal.id)?.option.activity?.id;
-    const label = document.createElement('label'); label.innerHTML = `After dinner (optional)<select name="activityId"><option value="">Keep it to dinner</option>${(S.activities || []).map(p => `<option value="${esc(p.id)}" ${p.id === current ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
-    form.insertBefore(label, form.querySelector('[type="submit"]'));
-  }
-  if (modal.type === 'facts' && modal.facts?.activity) $('.modal-content')?.insertAdjacentHTML('beforeend', `<div class="section-heading"><h3>Second stop</h3></div>${factsView(modal.facts.activity)}`);
-  if ($('.modal-content')) $('.modal-content').scrollTop = scroll;
-  for (const name of openDetails) { const detail = [...document.querySelectorAll('.modal-content details')].find(d => d.className === name); if (detail) detail.open = true; }
-  if (!sameModal) $('.modal input:not([type="checkbox"]), .modal textarea, .modal button')?.focus({ preventScroll: true });
-}
-function planForm() {
-  const draft = modal.draft || {};
-  return `<form id="plan-form" class="stack"><p class="muted">You pick the people. Your agents work out the details.</p><label>What’s the occasion?<input name="title" value="${esc(draft.title || 'Dinner with the crew')}" maxlength="80" required></label><div><p class="field-label">Choose your friends</p><div class="friend-choices">${S.friends.filter(u => ['ricky', 'aditya', 'arnav', 'daniel'].includes(u.id)).map(u => `<label class="friend-choice"><input name="friends" type="checkbox" value="${u.id}" ${(draft.friends || []).includes(u.id) ? 'checked' : ''}>${avatar(u, true)}<span>${esc(u.name)}</span><span class="choice-check">${icon('check')}</span></label>`).join('')}</div></div><label>Day<input name="date" type="date" value="${S.defaultDate}" required></label><div class="form-columns"><label>Starting time<input name="time" type="time" value="19:00" required></label><label>Proposed spend / person<input name="allowance" type="number" min="0" max="10000" value="24" required></label></div><p class="tiny muted">The proposed spend is a group meal allowance, not a verified restaurant price. Individual budgets stay private.</p>${modal.placeId ? `<div class="tag">Starting with your selected restaurant</div>` : ''}<button type="submit" class="btn primary wide">Let our agents work it out ${icon('sparkle')}</button></form>`;
-}
-function settingsForm() {
-  const p = S.me.private;
-  return `<form id="settings-form" class="stack"><div class="private-banner">${icon('lock')} Only you and your agent</div><label>Usual budget per outing ($)<input name="budget" type="number" min="0" max="10000" value="${p.budget}" required></label><div class="form-columns"><label>Free from<input name="start" type="time" value="${p.start}" required></label><label>Until<input name="end" type="time" value="${p.end}" required></label></div><fieldset><legend>Available days</legend><div class="days">${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => `<label><input name="days" type="checkbox" value="${d}" ${p.days.includes(d) ? 'checked' : ''}><span>${d.slice(0, 3)}</span></label>`).join('')}</div></fieldset><label>Dietary needs<input name="dietary" value="${esc(p.dietary)}" placeholder="e.g. vegetarian, or vegetarian preferred"></label><label>Things you love<input name="interests" value="${esc(p.interests)}" placeholder="Coffee, ramen, live music"></label><label>Other preferences<textarea name="preferences" rows="2">${esc(p.preferences)}</textarea></label><label>Social energy<select name="energy">${['low', 'medium', 'high'].map(e => `<option ${p.energy === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label><button class="btn primary wide" type="submit">Save private preferences ${icon('check')}</button><p class="tiny muted">Existing invitations aren’t changed automatically. Ask your agent to revise an active plan.</p></form>`;
-}
-function reviewForm() {
-  const p = modal.place, previous = S.myReviews.find(r => r.placeId === p.id);
-  return `<form id="review-form" class="stack"><div class="review-item">${art(p.category, 2)}<h2>${esc(p.name)}</h2><p class="muted">${esc(p.category)} · ${esc(p.area)}</p></div><label class="rating-label">Your rating <output id="rating-output">${previous?.rating || '8.5'}</output><input type="range" name="rating" min="0" max="10" step="0.1" value="${previous?.rating || 8.5}"></label><label>Note for friends<textarea name="quote" rows="3" placeholder="What would you tell your friends?" required minlength="3" maxlength="2000">${esc(previous?.quote || '')}</textarea></label><label>Tags, separated by commas<input name="tags" value="${esc(previous?.tags.join(', ') || '')}" placeholder="quiet, first date, good for groups"></label><button class="btn primary wide" type="submit">Post to friends ${icon('arrow')}</button><p class="tiny muted">Your friends’ rankings update as soon as this is saved.</p></form>`;
-}
-function placeDetail(p) {
-  const avg = p.reviews.length ? (p.reviews.reduce((a, r) => a + r.rating, 0) / p.reviews.length).toFixed(1) : '—';
-  return `<div class="place-hero">${art(p.category + ' ' + p.name, 0)}</div><div class="row"><div><p class="eyebrow">${esc(p.category)} · ${esc(p.area)}</p><h2>${esc(p.name)}</h2></div><span class="score">${avg}</span></div><p class="muted small-text">${esc(p.address || 'Address not provided')}</p><div class="row wrap">${button(icon('save') + (p.saved ? ' Saved' : ' Want to try'), 'save', '', `data-id="${esc(p.id)}"`)}${button('Log an opinion', 'review', '', `data-id="${esc(p.id)}"`)}</div>${/food|restaurant|cafe|tea|bar|pizza|brunch|coffee|bakery/i.test(p.category) ? button('Plan this ' + icon('arrow'), 'new-plan', 'primary wide mt', `data-place="${esc(p.id)}"`) : ''}<div class="section-heading"><h3>What friends say</h3></div>${p.reviews.map(r => `<div class="friend-review"><div class="row"><div class="row small-gap">${avatar(r.author, true)}<strong>${esc(r.author.name)}</strong></div><span class="score small-score">${r.rating.toFixed(1)}</span></div><blockquote>“${esc(r.quote)}”</blockquote><p class="tiny muted">${r.synthetic ? 'Fictional demo opinion · score derived from sentiment' : 'Shared by your friend'}</p></div>`).join('') || '<p class="muted">No opinions from your circle yet.</p>'}<div class="section-heading"><h3>Place details</h3></div><p class="small-text muted">${esc(p.provenance)}${p.hours ? `<br>Listed hours: ${esc(p.hours)}` : ''}</p><div class="row wrap">${button('Check current details', 'facts', 'small-btn', `data-id="${esc(p.id)}"`)}${p.source ? `<a class="btn small-btn" href="${safeUrl(p.source)}" target="_blank" rel="noopener noreferrer">Source ↗</a>` : ''}</div>`;
-}
-function factsView(facts) {
-  if (!facts) return '<div class="loading-state"><span class="agent-mark spin">✳</span><h3>Checking the details…</h3><p>Looking for current hours, menu prices, and options.</p></div>';
-  return `<span class="status ${facts.status === 'sourced' ? 'confirmed' : 'needs_decision'}">${facts.status === 'sourced' ? 'Sources found' : 'Not verified'}</span><p class="facts-summary">${esc(facts.summary)}</p>${facts.checkedAt ? `<p class="tiny muted">Checked ${new Date(facts.checkedAt).toLocaleTimeString()}</p>` : ''}<div class="source-list">${(facts.sources || []).map(s => `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a>`).join('')}</div>${facts.searchSuggestions ? `<iframe class="search-suggestions" title="Google Search suggestions" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(facts.searchSuggestions)}"></iframe>` : ''}`;
-}
-function planDetail(p) {
-  const accepted = p.participants.filter(u => p.rsvps[u.id] === 'in').length;
-  return `<div class="plan-heading"><span class="status ${p.state}">${statusText[p.state]}</span><h1>${esc(p.title)}</h1><p>${prettyDate(p.option.date)} · ${prettyTime(p.option.time)}</p></div>${p.previous && (p.previous.time !== p.option.time || p.previous.date !== p.option.date || p.previous.place.id !== p.option.place.id || p.previous.allowance !== p.option.allowance) ? `<div class="diff"><strong>Here’s what changed</strong>${p.previous.date !== p.option.date ? `<p>${prettyDate(p.previous.date)} → ${prettyDate(p.option.date)}</p>` : ''}${p.previous.time !== p.option.time ? `<p><s>${prettyTime(p.previous.time)}</s> → ${prettyTime(p.option.time)}</p>` : ''}${p.previous.place.id !== p.option.place.id ? `<p>${esc(p.previous.place.name)} → ${esc(p.option.place.name)}</p>` : ''}${p.previous.allowance !== p.option.allowance ? `<p>Proposed spend: $${p.previous.allowance} → $${p.option.allowance}</p>` : ''}<p class="tiny">The host must approve before anyone reconfirms.</p></div>` : ''}<div class="route-card"><div class="route-marker">${icon('pin')}</div><div><span class="eyebrow">${prettyTime(p.option.time)} · DINNER</span><h2>${esc(p.option.place.name)}</h2><p>${esc(p.option.place.area)} · $${p.option.allowance} proposed / person</p><p class="tiny muted">Meal allowance; actual menu price ${p.facts?.price ? `estimated at $${p.facts.price} by web sources` : 'unverified'}.</p></div></div>${p.isHost && p.candidates[0] ? `<p class="choice-reason">${icon('sparkle')} ${esc(p.candidates.find(c => c.place.id === p.option.place.id)?.reason || 'A new proposal for the group')}</p>` : ''}${p.state === 'negotiating' || p.state === 'awaiting_approval' || p.state === 'needs_decision' ? `<div class="section-heading"><h3>Your agents are on it</h3><span class="tiny muted">Round ${p.round} of 3</span></div><div class="agent-lanes">${p.participants.map(u => { const last = p.log.filter(l => l.userId === u.id).at(-1); return `<div class="agent-lane">${avatar(u, true)}<div><strong>${esc(u.name)}’s agent</strong><p>${last ? esc(last.text) : 'Checking privately…'}</p></div><span class="lane-status ${last?.type || ''}">${last?.type === 'accept' ? icon('check') : '···'}</span></div>`; }).join('')}</div><div class="privacy-callout">${icon('lock')} Budgets, calendars, and reasons stay with each person’s agent.</div><details class="negotiation-log"><summary>See how it came together</summary>${p.log.map(l => `<p><span>R${l.round}</span> ${esc(l.text)}</p>`).join('')}</details>` : `<div class="section-heading"><h3>Who’s coming</h3><span class="tiny muted">${accepted}/${p.participants.length} in</span></div>${p.participants.map(u => `<div class="rsvp-row">${avatar(u, true)}<strong>${esc(u.name)}</strong><span class="status ${p.rsvps[u.id] === 'in' ? 'confirmed' : 'invited'}">${({ in: 'I’m in', pending: 'Waiting', reconfirm: 'Reconfirm', out: 'Can’t make it' })[p.rsvps[u.id]] || 'Pending'}</span></div>`).join('')}`}${p.issue ? `<div class="issue"><strong>Your call.</strong><p>${esc(p.issue)}</p></div>` : ''}${p.warnings.map(w => `<p class="unmatched">${esc(w)}</p>`).join('')}<div class="venue-check"><div><strong>${p.facts?.status === 'sourced' ? 'Web sources checked' : 'Venue details need checking'}</strong><p>Hours, menu prices, and dietary options.</p></div>${button('Details', 'plan-facts', 'small-btn', `data-id="${p.id}"`)}</div><div class="plan-actions">${p.isHost && p.state === 'awaiting_approval' ? `${button((p.hasPendingChange ? 'Approve & send update' : 'Approve & send invites') + icon('arrow'), 'approve', 'primary wide', `data-id="${p.id}" data-revision="${p.revision}"`)}<div class="row">${button('Change something', 'tweak', 'wide', `data-id="${p.id}"`)}${button('Another option', 'another', 'wide', `data-id="${p.id}"`)}</div>` : ''}${p.isHost && p.state === 'needs_decision' ? button('Choose a new proposal', 'tweak', 'primary wide', `data-id="${p.id}"`) : ''}${p.state === 'invited' && !p.isHost && p.myRsvp !== 'in' ? `<div class="row">${button('I’m in ' + icon('check'), 'rsvp-in', 'primary wide', `data-id="${p.id}"`)}${button('Can’t make it', 'rsvp-out', 'wide', `data-id="${p.id}"`)}</div>` : ''}${['invited', 'confirmed', 'awaiting_approval', 'needs_decision'].includes(p.state) ? button('Tell my agent I need a change', 'change', 'wide', `data-id="${p.id}"`) : ''}${p.isHost && p.state === 'confirmed' ? button('Preview booking confirmation', 'book', 'primary wide', `data-id="${p.id}"`) : ''}${['confirmed', 'booked'].includes(p.state) ? button('Download calendar event', 'calendar', 'wide', `data-id="${p.id}"`) : ''}${p.booking ? `<div class="booking"><span class="celebrate">✳</span><h2>You’re all set. Almost.</h2><strong>${esc(p.booking.reference)}</strong><p>${esc(p.booking.note)}</p><span class="tag">Next up: real restaurant reservations</span></div>` : ''}${p.isHost && !['cancelled', 'booked'].includes(p.state) ? button('Cancel plan', 'cancel', 'text-button danger', `data-id="${p.id}"`) : ''}</div><details class="history"><summary>Plan history</summary>${p.history.map(h => `<p>${esc(h.text)}</p>`).join('')}</details><p class="data-note">${p.mode === 'local' ? 'Local demo agents evaluate real constraints against your proposal.' : `Agent provider: ${esc(p.mode)}`}</p>`;
-}
-function changeForm() { return `<form id="change-form" class="stack"><div class="private-banner">${icon('lock')} Only your agent sees what you write.</div><label>What changed?<textarea name="text" rows="4" required placeholder="Can’t do 8:30, could do 9. Keep tonight under $15."></textarea></label><button class="btn primary wide" type="submit">Ask my agent to work it out ${icon('arrow')}</button><p class="tiny muted">Others receive only a revised proposal. The host approves before invitations update.</p></form>`; }
-function tweakForm() { const p = S.plans.find(p => p.id === modal.id); return `<form id="tweak-form" class="stack"><p class="muted">Your guest list stays the same. Agents will recheck this proposal.</p><label>Day<input name="date" type="date" value="${p.option.date}" required></label><label>Time<input name="time" type="time" value="${p.option.time}" required></label><label>Proposed spend per person ($)<input name="allowance" type="number" min="0" max="10000" value="${p.option.allowance}" required></label><label>Restaurant<select name="placeId">${p.candidates.map(c => `<option value="${esc(c.place.id)}" ${c.place.id === p.option.place.id ? 'selected' : ''}>${esc(c.place.name)}</option>`).join('')}</select></label><button class="btn primary wide" type="submit">Recheck with everyone ${icon('arrow')}</button></form>`; }
-function friendsView() { return `<p class="muted">Opinions travel through your friend connections.</p>${S.requests.map(r => `<div class="list-item">${avatar(r.fromUser, true)}<strong>${esc(r.fromUser.name)}</strong>${button('Accept', 'accept-friend', 'small-btn primary', `data-id="${r.from}"`)}</div>`).join('')}<p class="section-label">YOUR FRIENDS · ${S.friends.length}</p>${S.friends.map(u => `<div class="list-item">${avatar(u, true)}<div><strong>${esc(u.name)}</strong><p>${u.fictional ? 'Fictional taste contributor' : 'Personal agent ready'}</p></div>${!u.fictional ? button('Plan', 'plan-friend', 'small-btn', `data-id="${u.id}"`) : ''}</div>`).join('')}<p class="section-label">DISCOVER PEOPLE</p>${S.people.slice(0, 10).map(u => `<div class="list-item">${avatar(u, true)}<div><strong>${esc(u.name)}</strong><p>${esc(u.area)} · Fictional persona</p></div>${button('Add', 'add-friend', 'small-btn', `data-id="${u.id}"`)}</div>`).join('')}`; }
-
-async function catalog(query = '') { const results = await api('/catalog?q=' + encodeURIComponent(query)); if (modal?.type !== 'catalog') return; $('#catalog-results').innerHTML = results.map(p => `<button class="list-item" data-action="catalog-pick" data-id="${esc(p.id)}"><span class="mini-art">${icon('pin')}</span><div><strong>${esc(p.name)}</strong><p>${esc(p.category)} · ${esc(p.area)}</p></div>${icon('plus')}</button>`).join('') || '<p class="muted">No match yet. Add the item below.</p>'; }
-async function openPlace(id, type = 'place') { const place = await api('/place?id=' + encodeURIComponent(id)); openModal({ type, place }); }
-async function sendChat(text, planId) { pending = true; view = 'chat'; render(); scrollChat(); try { await api('/chat', { text, planId }); chatDraft = ''; if ($('#message')) $('#message').value = ''; await refresh(); scrollChat(); } finally { pending = false; render(); } }
-function scrollChat() { requestAnimationFrame(() => { if ($('#main')) $('#main').scrollTop = $('#main').scrollHeight; }); }
 
 document.addEventListener('click', async event => {
   const el = event.target.closest('[data-action]'); if (!el) return;
+  if (el.tagName === 'A' && el.getAttribute('href') === '#') event.preventDefault();
   const action = el.dataset.action, id = el.dataset.id;
   if (parent !== window && S) parent.postMessage({ kind: 'disco-active', user: S.me.id }, location.origin);
+  if (action !== 'cat-toggle' && action !== 'cat') ui.catOpen = false;
   try {
     switch (action) {
-      case 'nav': view = el.dataset.view; closeModal(); render(); $('#main').scrollTop = 0; break;
-      case 'close': closeModal(); break;
-      case 'onboard': await api('/onboard', {}); await refresh(); break;
-      case 'prompt': closeModal(); await sendChat(el.dataset.text); break;
-      case 'new-plan': { const draft = S.chat.find(m => m.id === el.dataset.draft)?.draft; openModal({ type: 'new-plan', placeId: el.dataset.place, draft }); break; }
-      case 'plan-friend': openModal({ type: 'new-plan', draft: { friends: [id] } }); break;
-      case 'match-plan': { const match = S.matches.find(m => m.place.id === id); openModal({ type: 'new-plan', placeId: id, draft: { friends: match.friends.filter(u => ['ricky', 'aditya', 'arnav', 'daniel'].includes(u.id)).map(u => u.id) } }); break; }
-      case 'plan': openModal({ type: 'plan', id }); break;
-      case 'place': await openPlace(id); break;
-      case 'review': await openPlace(id, 'review'); break;
-      case 'settings': openModal({ type: 'settings' }); break;
-      case 'friends': openModal({ type: 'friends' }); break;
-      case 'catalog': openModal({ type: 'catalog', purpose: el.dataset.purpose || 'review' }); await catalog(); $('#catalog-query').focus(); break;
-      case 'catalog-pick': await openPlace(id, modal.purpose === 'review' ? 'review' : 'place'); break;
-      case 'add-item': openModal({ type: 'add-item' }); break;
-      case 'filter': filter = el.dataset.filter; render(); break;
-      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try.' : 'Removed from Want to try.'); await refresh(); if (modal?.type === 'place') await openPlace(id); break; }
+      case 'tab': tab(el.dataset.view); break;
+      case 'back': back(); break;
+      case 'prompt': tab('chat'); await sendChat(el.dataset.text); break;
+      case 'place': go('place', { id }); break;
+      case 'log': go('log', { id }); break;
+      case 'catalog': if (el.dataset.replace) replace('catalog', { purpose: 'review', fromLog: true }); else go('catalog', { purpose: el.dataset.purpose || 'review' }); break;
+      case 'catalog-pick': if (cur().purpose === 'review') replace('log', { id }); else go('place', { id }); break;
+      case 'additem': go('additem'); break;
+      case 'filter': ui.filter = el.dataset.value; render(); break;
+      case 'ptab': ui.ptab = el.dataset.value; render(); break;
+      case 'cat-toggle': ui.catOpen = !ui.catOpen; render(); break;
+      case 'cat': ui.pcat = el.dataset.value; ui.catOpen = false; render(); break;
+      case 'comments': ui.comments.has(id) ? ui.comments.delete(id) : ui.comments.add(id); render(); break;
       case 'like': await api('/like', { reviewId: id }); await refresh(); break;
+      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
+      case 'tag': { const set = ui.logs[id].tags; set.has(el.dataset.value) ? set.delete(el.dataset.value) : set.add(el.dataset.value); render(); break; }
+      case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
+      case 'post-review': {
+        const st = ui.logs[id], quote = String(drafts.note || '').trim(); if (quote.length < 3) { toast('Add a short note for friends first.'); $('#note')?.focus(); break; }
+        el.disabled = true; await api('/reviews', { placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
+        delete drafts.note; delete ui.logs[id]; await refresh(); back(); toast('Posted. Your friends’ picks just updated.'); break;
+      }
+      case 'friends': go('friends'); break;
+      case 'addfriends': go('addfriends'); break;
+      case 'settings': go('settings'); break;
+      case 'newplan': { const draft = S.chat.find(m => m.id === el.dataset.draft)?.draft; go('newplan', { draft, placeId: el.dataset.place }); break; }
+      case 'plan-friend': go('newplan', { friends: [id] }); break;
+      case 'plan': openPlan(id); break;
+      case 'working': case 'details': case 'invite': case 'changed': case 'change': case 'rate': go(action, { id }); break;
+      case 'approve-open': go(findPlan(id)?.hasPendingChange ? 'changed' : 'approve', { id }); break;
+      case 'approve': { el.disabled = true; const revised = findPlan(id)?.hasPendingChange; await api('/plans/approve', { planId: id, revision: Number(el.dataset.revision) }); await refresh(); replace('details', { id }); toast(revised ? 'Update sent. Anyone already in gets a quick reconfirm.' : 'Invites sent. Each friend hears from their own agent.'); break; }
+      case 'another': el.disabled = true; await api('/plans/revise', { planId: id, another: true }); await refresh(); replace('working', { id }); break;
+      case 'drop': el.disabled = true; await api('/plans/drop', { planId: id, userId: el.dataset.user }); await refresh(); replace('details', { id }); toast('Kept the original plan.'); break;
+      case 'rsvp-in': case 'rsvp-out': el.disabled = true; await api('/plans/rsvp', { planId: id, response: action === 'rsvp-in' ? 'in' : 'out' }); await refresh(); replace('details', { id }); toast(action === 'rsvp-in' ? 'You’re in.' : 'Got it. Only “can’t make it” was shared.'); break;
+      case 'cancel': await api('/plans/cancel', { planId: id }); await refresh(); replace('details', { id }); break;
+      case 'book': await api('/plans/book', { planId: id }); await refresh(); toast('Demo confirmation created. No real reservation was made.'); break;
+      case 'calendar': { const response = await fetch('/api/calendar?id=' + id, { headers: { Authorization: `Bearer ${token}` } }); if (!response.ok) throw new Error('Confirm the plan first.'); const href = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = href; a.download = 'disco-plan.ics'; a.click(); setTimeout(() => URL.revokeObjectURL(href), 2000); break; }
+      case 'facts': go('facts', { placeId: id }); break;
+      case 'plan-facts': go('facts', { planId: id }); break;
       case 'memory-save': case 'memory-skip': await api('/memory', { action: action === 'memory-save' ? 'save' : 'skip', pendingId: S.me.pendingMemory.id }); await refresh(); break;
       case 'forget': await api('/memory', { action: 'forget', memoryId: id }); await refresh(); break;
-      case 'clear-temporary': await api('/temporary/clear', {}); await refresh(); toast('Temporary preferences cleared.'); break;
-      case 'approve': el.disabled = true; await api('/plans/approve', { planId: id, revision: Number(el.dataset.revision) }); toast('Invitations sent to your crew.'); await refresh(); break;
-      case 'rsvp-in': case 'rsvp-out': el.disabled = true; await api('/plans/rsvp', { planId: id, response: action === 'rsvp-in' ? 'in' : 'out' }); await refresh(); break;
-      case 'another': el.disabled = true; await api('/plans/revise', { planId: id, another: true }); await refresh(); break;
-      case 'tweak': openModal({ type: 'tweak', id }); break;
-      case 'change': openModal({ type: 'change', id }); break;
-      case 'cancel': await api('/plans/cancel', { planId: id }); await refresh(); break;
-      case 'book': await api('/plans/book', { planId: id }); await refresh(); break;
-      case 'calendar': { const response = await fetch('/api/calendar?id=' + id, { headers: { Authorization: `Bearer ${token}` } }); if (!response.ok) throw new Error('Confirm the plan first.'); const href = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = href; a.download = 'disco-plan.ics'; a.click(); setTimeout(() => URL.revokeObjectURL(href), 2000); break; }
-      case 'facts': { openModal({ type: 'facts', facts: null }); const facts = await api('/facts', { placeId: id, date: S.defaultDate, time: '19:00' }); if (modal?.type === 'facts') openModal({ type: 'facts', facts }); break; }
-      case 'plan-facts': openModal({ type: 'facts', facts: S.plans.find(p => p.id === id).facts }); break;
-      case 'add-friend': case 'accept-friend': { const result = await api('/friends', { userId: id, accept: action === 'accept-friend' }); toast(result.message); await refresh(); openModal({ type: 'friends' }); break; }
+      case 'clear-temporary': await api('/temporary/clear', {}); await refresh(); toast('Cleared.'); break;
+      case 'match-plan': {
+        const m = S.matches.find(x => x.place.id === id), friends = m.friends.filter(f => MAIN_IDS.includes(f.id)).map(f => f.id); el.disabled = true;
+        await createPlan({ title: `${m.place.name} with ${names(m.friends.filter(f => friends.includes(f.id)).map(f => f.name.split(' ')[0]))}`, friends, placeId: group(m.place) === 'Eat & Drink' ? id : undefined, date: m.window?.date || S.defaultDate, time: m.window?.time || '19:00', allowance: 24, query: m.place.name });
+        break;
+      }
+      case 'match-dismiss': await api('/matches/dismiss', { placeId: id }); await refresh(); toast('Hidden for two weeks.'); break;
+      case 'friend-add': { const result = await api('/friends', { userId: id }); await refresh(); toast(result.message); break; }
+      case 'friend-accept': case 'friend-decline': { const result = await api('/friends', { userId: id, accept: action === 'friend-accept', decline: action === 'friend-decline' }); await refresh(); toast(result.message); break; }
+      case 'share-link': { const link = el.dataset.link; try { if (navigator.share) await navigator.share({ title: 'Join me on Disco', url: link }); else { await navigator.clipboard.writeText(link); toast('Invite link copied.'); } } catch { toast(link); } break; }
+      case 'toggle-qr': ui.qr = !ui.qr; render(); break;
+      case 'import': ui.imports[el.dataset.value] = !ui.imports[el.dataset.value]; render(); break;
+      case 'quickrate': go('quickrate'); break;
+      case 'welcome-skip': await api('/onboard', { answers: [] }); await refresh(); break;
+      case 'quick': { const q = ui.quick; q.answers.push({ placeId: q.picks[q.i].place.id, answer: el.dataset.value }); q.i++; if (q.i >= q.picks.length) await finishQuick(); else render(); break; }
+      case 'quick-skip': await finishQuick(); break;
+      case 'finish-onboarding': tab('chat'); break;
+      case 'night-quick': (ui.nights[id] ||= {})[el.dataset.place] = Number(el.dataset.value); render(); break;
+      case 'post-night': {
+        const st = ui.nights[id] || {}, list = Object.entries(st).map(([placeId, rating]) => ({ placeId, rating }));
+        if (!list.length) { toast('Rate at least one stop first.'); break; }
+        el.disabled = true; await api('/plans/rate', { planId: id, stops: list, note: drafts['night-note'] || '' }); delete drafts['night-note']; delete ui.nights[id]; await refresh(); back(); toast('Posted. Your friends will see it in their feed.'); break;
+      }
       case 'logout': await api('/logout', {}); logoutLocal(); break;
     }
-  } catch (error) { toast(error.message); el.disabled = false; }
+  } catch (error) { toast(error.message); if (el.isConnected) el.disabled = false; }
 });
+
 document.addEventListener('submit', async event => {
-  const form = event.target; event.preventDefault(); const data = new FormData(form); const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
+  const form = event.target; event.preventDefault(); const data = new FormData(form), submit = form.querySelector('button:not([type="button"])');
+  if (submit) submit.disabled = true;
   try {
     if (form.id === 'login-form') await login(data.get('username'), data.get('password'));
-    if (form.id === 'chat-form') { if (pending) return; await sendChat(data.get('message')); }
-    if (form.id === 'plan-form') { const result = await api('/plans', { title: data.get('title'), date: data.get('date'), time: data.get('time'), allowance: Number(data.get('allowance')), friends: data.getAll('friends'), placeId: modal.placeId, activityId: data.get('activityId') || undefined, query: modal.draft?.query || 'restaurants' }); await refresh(); openModal({ type: 'plan', id: result.planId }); }
-    if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); closeModal(); await refresh(); toast('Your private preferences are saved.'); }
-    if (form.id === 'review-form') { await api('/reviews', { placeId: modal.place.id, rating: Number(data.get('rating')), quote: data.get('quote'), tags: data.get('tags').split(',').map(x => x.trim()).filter(Boolean) }); closeModal(); await refresh(); toast('Opinion posted. Your circle’s rankings just updated.'); }
-    if (form.id === 'item-form') { const place = await api('/items', Object.fromEntries(data)); openModal({ type: 'review', place }); }
-    if (form.id === 'change-form') { const id = modal.id; closeModal(); await sendChat(data.get('text'), id); }
-    if (form.id === 'tweak-form') { const id = modal.id; await api('/plans/revise', { planId: id, option: { ...Object.fromEntries(data), allowance: Number(data.get('allowance')) } }); await refresh(); openModal({ type: 'plan', id }); }
+    if (form.id === 'chat-form') { const text = String(drafts.message || '').trim(); if (text && !pending) await sendChat(text); }
+    if (form.dataset.form === 'comment') { const key = 'c-' + form.dataset.id, text = String(drafts[key] || '').trim(); if (text) { await api('/comment', { reviewId: form.dataset.id, text }); delete drafts[key]; await refresh(); } }
+    if (form.dataset.form === 'tag') { const t = cap(String(drafts.newtag || '').trim()); if (t) ui.logs[form.dataset.id].tags.add(t); delete drafts.newtag; ui.newTag = false; render(); }
+    if (form.dataset.form === 'tell') {
+      const text = String(drafts.tell || '').trim(); if (!text) { toast('Tell your agent what changed.'); return; }
+      await api('/chat', { text, planId: form.dataset.id }); delete drafts.tell; await refresh(); replace('details', { id: form.dataset.id }); toast('Sent to your agent. The host only sees the new proposal.');
+    }
+    if (form.id === 'plan-form') {
+      const r = cur(), friends = data.getAll('friends'); if (!friends.length) { toast('Pick at least one friend.'); return; }
+      await createPlan({ title: data.get('title'), date: data.get('date'), time: data.get('time'), allowance: Number(data.get('allowance')), friends, placeId: r.placeId, activityId: data.get('activityId') || undefined, query: r.draft?.query || 'restaurants' });
+    }
+    if (form.id === 'tweak-form') { const id = form.dataset.id; await api('/plans/revise', { planId: id, option: { ...Object.fromEntries(data), allowance: Number(data.get('allowance')) } }); await refresh(); replace('working', { id }); }
+    if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); await refresh(); back(); toast('Private settings saved.'); }
+    if (form.id === 'item-form') { const place = await api('/items', Object.fromEntries(data)); replace('log', { id: place.id }); }
   } catch (error) { toast(error.message); } finally { if (submit?.isConnected) submit.disabled = false; }
 });
+
 document.addEventListener('input', event => {
-  if (event.target.id === 'message') chatDraft = event.target.value;
-  if (event.target.name === 'rating') $('#rating-output').textContent = Number(event.target.value).toFixed(1);
-  if (event.target.id === 'catalog-query') { clearTimeout(searchTimer); searchTimer = setTimeout(() => catalog(event.target.value).catch(e => toast(e.message)), 250); }
+  const el = event.target;
+  if (el.matches('[data-slider]')) { updateSlider(el); return; }
+  if (el.id && ['INPUT', 'TEXTAREA'].includes(el.tagName) && el.type !== 'checkbox' && el.type !== 'radio') drafts[el.id] = el.value;
+  if (el.id === 'friend-q' || el.id === 'people-q') render();
+  if (el.id === 'catalog-q') { clearTimeout(searchTimer); searchTimer = setTimeout(async () => { const r = cur(); if (r.name !== 'catalog') return; try { r.data = await api('/catalog?q=' + encodeURIComponent(el.value)); render(); } catch (error) { toast(error.message); } }, 250); }
 });
+document.addEventListener('change', event => { if (event.target.matches('[data-slider][data-night]')) updateSlider(event.target); });
+document.addEventListener('toggle', event => { const d = event.target; if (d.matches?.('details[data-key]')) d.open ? ui.open.add(d.dataset.key) : ui.open.delete(d.dataset.key); }, true);
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && modal) closeModal();
-  if (event.key === 'Tab' && modal) { const items = [...document.querySelectorAll('.modal button:not([disabled]), .modal input, .modal textarea, .modal select, .modal a[href], .modal summary')].filter(e => e.offsetParent !== null); const first = items[0], last = items.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } }
-  if (event.target.id === 'message' && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#chat-form').requestSubmit(); }
+  if (event.key === 'Escape') { if (ui.catOpen) { ui.catOpen = false; render(); } else if (S && stack.length > 1 && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) back(); }
 });
-window.addEventListener('message', async event => { if (event.origin !== location.origin || event.source !== parent || parent === window) return; if (event.data.kind === 'disco-login' && ['ricky', 'aditya', 'arnav', 'daniel'].includes(slot) && !token) { try { await login(slot, event.data.password); } catch (error) { toast(error.message); } } });
+window.addEventListener('message', async event => {
+  if (event.origin !== location.origin || event.source !== parent || parent === window) return;
+  if (event.data.kind === 'disco-login' && MAIN_IDS.includes(slot) && !token) { try { await login(slot, event.data.password); } catch (error) { toast(error.message); } }
+});
 if (token) { await refresh(); if (S) { live(); if (parent !== window) parent.postMessage({ kind: 'disco-ready', user: S.me.id }, location.origin); } } else await loginScreen();

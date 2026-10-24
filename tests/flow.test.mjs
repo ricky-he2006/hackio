@@ -136,3 +136,68 @@ test('HTTP auth boundary, private files, origin checks, independent sessions, an
   assert.equal((await fetch(base + '/')).status, 200); assert.equal((await fetch(base + '/demo')).status, 200);
   const p = await start(engine); assert.equal((await fetch(base + '/api/calendar?id=' + p.id, { headers })).status, 400);
 });
+
+test('comments stay in the friend circle; save activity groups into the feed and unsaving removes it', () => {
+  const { store, engine } = setup(); const review = engine.state('ricky').feed.find(r => r.userId === 'daniel');
+  engine.comment('ricky', review.id, 'Going back next week.');
+  assert.equal(engine.state('daniel').feed.find(r => r.id === review.id).comments[0].text, 'Going back next week.');
+  assert.throws(() => engine.comment('ricky', review.id, '   '), /Write a comment/);
+  const [a, b] = engine.quickPicks('daniel').map(x => x.place.id);
+  engine.savePlace('daniel', a); engine.savePlace('daniel', b);
+  const group = engine.state('ricky').saves.find(s => s.author.id === 'daniel'); assert.deepEqual(group.places.map(p => p.id).sort(), [a, b].sort());
+  engine.savePlace('daniel', a); assert.deepEqual(engine.state('ricky').saves.find(s => s.author.id === 'daniel').places.map(p => p.id), [b]);
+  store.close();
+});
+
+test('friend requests can be declined; onboarding answers become quick ratings and saves', () => {
+  const { store, engine } = setup(); const stranger = engine.state('ricky').people.find(p => p.fictional).id;
+  engine.d.requests.push({ id: 'req', from: stranger, to: 'ricky' }); assert.equal(engine.state('ricky').requests.length, 1);
+  engine.friendRequest('ricky', stranger, false, true); assert.equal(engine.state('ricky').requests.length, 0); assert.ok(!engine.user('ricky').friends.includes(stranger));
+  const picks = engine.quickPicks('daniel'); assert.equal(picks.length, 10);
+  engine.onboard('daniel', { answers: [{ placeId: picks[0].place.id, answer: 'loved' }, { placeId: picks[1].place.id, answer: 'want' }, { placeId: picks[2].place.id, answer: 'never' }] });
+  const mine = engine.state('daniel').myReviews.find(r => r.placeId === picks[0].place.id);
+  assert.equal(mine.rating, 9); assert.equal(mine.quote, 'Loved it.'); assert.ok(engine.user('daniel').saved.includes(picks[1].place.id));
+  assert.ok(!engine.state('daniel').myReviews.some(r => r.placeId === picks[2].place.id)); assert.equal(engine.user('daniel').onboarded, true); store.close();
+});
+
+test('want-to-try matches share only a free-time conclusion and can be hidden for two weeks', () => {
+  const { store, engine } = setup(); engine.user('arnav').private.preferences = 'MATCH_PRIVATE_SENTINEL';
+  const place = engine.quickPicks('ricky')[0].place.id; engine.savePlace('ricky', place); engine.savePlace('arnav', place); engine.savePlace('aditya', place);
+  const match = engine.state('ricky').matches.find(m => m.place.id === place);
+  assert.deepEqual(match.friends.map(f => f.id).sort(), ['aditya', 'arnav']); assert.match(match.window.text, /^All free (Saturday|Sunday), /);
+  assert.ok(!JSON.stringify(match).includes('MATCH_PRIVATE_SENTINEL')); assert.ok(!JSON.stringify(match).includes(String(engine.user('arnav').private.budget) + ','));
+  engine.dismissMatch('ricky', place); assert.equal(engine.state('ricky').matches.length, 0); store.close();
+});
+
+test('chat-started plans include exactly the named friends; approval lists only resolved public codes', async () => {
+  const { store, engine } = setup();
+  await engine.chat('ricky', { text: 'plan something saturday night with daniel and aditya. something fun, not too pricey' });
+  const message = engine.user('ricky').chat.at(-1); assert.equal(message.kind, 'planStart'); assert.match(message.text, /^New adventure: Saturday night, something fun, kept cheap/);
+  await engine.jobs.get(message.planId); const view = engine.state('ricky').plans.find(p => p.id === message.planId);
+  assert.deepEqual(view.participants.map(u => u.id).sort(), ['aditya', 'daniel', 'ricky']); assert.equal(view.title, 'Saturday with Daniel & Aditya'); assert.equal(view.option.allowance <= 18, true);
+  assert.equal(view.state, 'awaiting_approval'); assert.ok(view.resolved.every(code => ['schedule', 'budget', 'dietary_unverified', 'closed', 'preference'].includes(code)));
+  store.close();
+});
+
+test('host can keep the original time without the friend who asked; only the host may', async () => {
+  const { store, engine } = setup(); const p = await start(engine); engine.approve('ricky', p.id, p.revision);
+  for (const id of MAIN_IDS.filter(x => x !== 'ricky')) engine.rsvp(id, p.id, 'in');
+  await engine.chat('arnav', { text: "Can't do 8:30, could do 9", planId: p.id }); await engine.jobs.get(p.id);
+  assert.equal(engine.state('ricky').plans[0].changeBy.id, 'arnav');
+  assert.throws(() => engine.dropParticipant('daniel', p.id, 'arnav'), /not found/);
+  engine.dropParticipant('ricky', p.id, 'arnav');
+  assert.deepEqual(p.participants, ['ricky', 'aditya', 'daniel']); assert.equal(p.option.time, '20:30'); assert.equal(p.state, 'confirmed');
+  assert.equal(engine.state('arnav').plans.length, 0); assert.throws(() => engine.dropParticipant('ricky', p.id, 'aditya'), /no pending change/); store.close();
+});
+
+test('rate the night writes plan-tagged reviews that friends see together', async () => {
+  const { store, engine } = setup(); const p = await start(engine); engine.approve('ricky', p.id, p.revision);
+  assert.throws(() => engine.rateNight('ricky', p.id, { stops: [{ placeId: p.option.place.id, rating: 9 }] }), /once everyone is in/);
+  for (const id of MAIN_IDS.filter(x => x !== 'ricky')) engine.rsvp(id, p.id, 'in');
+  assert.throws(() => engine.rateNight('ricky', p.id, { stops: [{ placeId: 'not-a-stop', rating: 9 }] }), /at least one stop/);
+  engine.rateNight('daniel', p.id, { stops: [{ placeId: p.option.place.id, rating: 8.5 }], note: 'gnocchi was elite' });
+  engine.rateNight('ricky', p.id, { stops: [{ placeId: p.option.place.id, rating: 9 }] });
+  const view = engine.state('ricky').plans[0]; assert.equal(view.myNightRating, 9);
+  assert.deepEqual(view.nightRatings.map(r => [r.userId, r.rating]).sort(), [['daniel', 8.5], ['ricky', 9]]);
+  assert.ok(engine.state('aditya').feed.some(r => r.userId === 'daniel' && r.quote === 'gnocchi was elite')); store.close();
+});
