@@ -4,6 +4,7 @@ import { Store, MAIN_IDS } from '../lib/data.mjs';
 import { Engine, nextSaturday, evaluatePrivate, timeString, listedHours } from '../lib/engine.mjs';
 import { createApp } from '../server.mjs';
 
+const dayOfWeek = date => new Date(`${date}T12:00:00Z`).getUTCDay();
 const setup = () => { const store = new Store({ path: ':memory:' }); const engine = new Engine(store, { delay: 0, search: async () => ({ status: 'unavailable', summary: 'Not connected', sources: [] }) }); return { store, engine }; };
 const start = async engine => { const { planId } = engine.createPlan('ricky', { friends: ['aditya', 'arnav', 'daniel'], date: nextSaturday(), time: '19:00', allowance: 24 }); await engine.jobs.get(planId); return engine.d.plans.find(p => p.id === planId); };
 
@@ -331,7 +332,9 @@ test('want-to-try matches share only a free-time conclusion and can be hidden fo
 test('chat-started plans include exactly the named friends; approval lists only resolved public codes', async () => {
   const { store, engine } = setup();
   await engine.chat('ricky', { text: 'plan something saturday night with daniel and aditya. something fun, not too pricey' });
-  const message = engine.user('ricky').chat.at(-1); assert.equal(message.kind, 'planStart'); assert.match(message.text, /^New adventure: Saturday night, something fun, kept cheap/);
+  // The adventure now lives in its own thread; main chat gets a pointer card to it.
+  const link = engine.user('ricky').chat.at(-1); assert.equal(link.kind, 'threadLink');
+  const message = engine.user('ricky').threads[link.planId].messages.find(m => m.kind === 'planStart'); assert.match(message.text, /^New adventure: Saturday night, something fun, kept cheap/);
   await engine.jobs.get(message.planId); const view = engine.state('ricky').plans.find(p => p.id === message.planId);
   assert.deepEqual(view.participants.map(u => u.id).sort(), ['aditya', 'daniel', 'ricky']); assert.equal(view.title, 'Saturday with Daniel & Aditya'); assert.equal(view.option.allowance <= 18, true);
   assert.equal(view.state, 'awaiting_approval'); assert.ok(view.resolved.every(code => ['schedule', 'budget', 'dietary_unverified', 'closed', 'preference'].includes(code)));
@@ -383,8 +386,9 @@ test('a hard diet cleared only by a web claim gets a private heads-up, never a g
   engine.search = async () => ({ status: 'sourced', checkedAt: new Date().toISOString(), sources: [{ title: 'Test fixture', url: 'https://example.test' }], price: 12, dietary: ['halal'], open: true });
   const p = await start(engine); assert.equal(p.state, 'awaiting_approval');
   engine.approve('ricky', p.id, p.revision);
-  assert.match(engine.user('daniel').chat.at(-1).text, /only passed your halal need because a web source said so/);
-  for (const other of ['ricky', 'aditya', 'arnav']) assert.ok(!engine.user(other).chat.some(m => /halal/i.test(m.text)), `${other} must not learn Daniel's diet`);
+  assert.match(engine.user('daniel').threads[p.id].messages.at(-1).text, /only passed your halal need because a web source said so/);
+  const everything = id => [...engine.user(id).chat, ...Object.values(engine.user(id).threads || {}).flatMap(t => t.messages)];
+  for (const other of ['ricky', 'aditya', 'arnav']) assert.ok(!everything(other).some(m => /halal/i.test(m.text)), `${other} must not learn Daniel's diet, in any chat`);
   store.close();
 });
 
@@ -616,4 +620,63 @@ test('unvouched cuisine suggestions are nearest to the person\'s shared location
   assert.ok(fromOsu.every(p => p.distanceSource === 'OSU')); assert.ok(fromHere.every(p => p.distanceSource === 'your location'));
   assert.ok(fromHere.every((p, i) => i === 0 || fromHere[i - 1].distance <= p.distance), 'sorted nearest first');
   assert.notDeepEqual(fromHere.map(p => p.id), fromOsu.map(p => p.id), 'a different location gives different nearest spots'); store.close();
+});
+
+test('an adventure gets its own chat: plan messages and talk about it stay out of the main recommendations chat', async () => {
+  const { store, engine } = setup();
+  await engine.chat('ricky', { text: 'find restaurants my friends love' });
+  const result = await engine.chat('ricky', { text: 'plan something saturday night with daniel and aditya' });
+  const planId = result.thread; assert.ok(planId, 'the reply names the new adventure chat so the UI can open it');
+  const main = engine.user('ricky').chat;
+  assert.ok(main.every(m => !m.planId || m.kind === 'threadLink'), 'no plan messages in main chat'); assert.equal(main.at(-1).kind, 'threadLink');
+  assert.ok(engine.user('ricky').threads[planId].messages.some(m => m.kind === 'planStart'));
+  await engine.jobs.get(planId);
+  const mainBefore = main.length;
+  await engine.chat('ricky', { text: 'how is this one going?', planId });
+  assert.equal(main.length, mainBefore, 'talking inside the adventure leaves main chat alone');
+  const thread = engine.user('ricky').threads[planId].messages; assert.equal(thread.at(-2).role, 'user'); assert.equal(thread.at(-2).text, 'how is this one going?');
+  const view = engine.state('ricky').threads.find(t => t.id === planId); assert.equal(view.title, 'Saturday with Daniel & Aditya'); assert.ok(view.messages.length >= 3);
+  store.close();
+});
+
+test('invitees get their own adventure chat only once invited, and only the host keeps the draft conversation', async () => {
+  const { store, engine } = setup();
+  const transcript = [{ role: 'agent', text: 'What would make this a good outing?' }, { role: 'user', text: 'pizza friday, my budget is tight' }];
+  const { planId } = engine.createPlan('ricky', { friends: ['daniel'], date: nextSaturday(), time: '19:00', allowance: 24, transcript });
+  assert.deepEqual(engine.user('ricky').threads[planId].messages.slice(0, 2).map(m => m.text), transcript.map(m => m.text));
+  await engine.jobs.get(planId); const p = engine.d.plans.find(x => x.id === planId);
+  assert.ok(!engine.user('daniel').threads?.[planId], 'no thread for an invitee before the host approves');
+  assert.ok(!engine.state('daniel').threads.some(t => t.id === planId));
+  assert.equal(p.state, 'awaiting_approval');
+  engine.approve('ricky', planId, p.revision);
+  assert.ok(engine.state('daniel').threads.some(t => t.id === planId)); assert.equal(engine.user('daniel').chat.at(-1).kind, 'threadLink');
+  assert.ok(!engine.user('daniel').threads[planId].messages.some(m => /budget is tight/.test(m.text)), "the host's draft stays private");
+  assert.ok(!engine.state('arnav').threads.some(t => t.id === planId), 'people not on the plan never see it'); store.close();
+});
+
+test('a stuck adventure is resolved in its own chat first: "let\'s try monday" re-plans it instead of searching restaurants', async () => {
+  const { store, engine } = setup(); engine.settings('arnav', { days: ['Monday'] }); engine.settings('ricky', { days: ['Saturday', 'Sunday', 'Monday'] });
+  const { planId } = engine.createPlan('ricky', { friends: ['arnav'], date: nextSaturday(), time: '19:00', allowance: 24 }); await engine.jobs.get(planId);
+  const p = engine.d.plans.find(x => x.id === planId); assert.equal(p.state, 'needs_decision', 'Arnav is only free on Mondays');
+  const thread = () => engine.user('ricky').threads[planId].messages, main = engine.user('ricky').chat.length;
+  await engine.chat('ricky', { text: 'what is good near campus?', planId });
+  assert.match(thread().at(-1).text, /^Let’s sort this adventure out first/); assert.ok(!thread().some(m => m.kind === 'recommendations'), 'not sent to restaurant search');
+  await engine.chat('ricky', { text: "let's try monday", planId });
+  assert.match(thread().at(-1).text, /^On it: trying Monday/); await engine.jobs.get(planId);
+  assert.equal(dayOfWeek(p.option.date), 1, 'moved to a Monday'); assert.equal(p.state, 'awaiting_approval', 'everyone can make Monday');
+  assert.equal(engine.user('ricky').chat.length, main, 'main chat untouched'); store.close();
+});
+
+test('stuck-adventure quick replies are understood: spending limit and another place', async () => {
+  const { store, engine } = setup(); engine.settings('daniel', { dietary: 'halal' }); // strict, with no evidence for any venue: stuck every round
+  const { planId } = engine.createPlan('ricky', { friends: ['daniel'], date: nextSaturday(), time: '19:00', allowance: 24 }); await engine.jobs.get(planId);
+  const p = engine.d.plans.find(x => x.id === planId); assert.equal(p.state, 'needs_decision');
+  const proposals = () => p.history.filter(h => /requested a new proposal/.test(h.text)).length, before = proposals();
+  await engine.chat('ricky', { text: 'Another place', planId }); await engine.jobs.get(planId);
+  assert.match(engine.user('ricky').threads[planId].messages.find(m => /^On it: trying another place/.test(m.text))?.text || '', /another place/);
+  assert.equal(proposals(), before + 1, 'a new proposal with another venue went to the agents');
+  assert.equal(p.state, 'needs_decision', 'still stuck: no venue has halal evidence');
+  await engine.chat('ricky', { text: 'Up to $34', planId }); await engine.jobs.get(planId);
+  assert.ok(engine.user('ricky').threads[planId].messages.some(m => /^On it: trying up to \$30 each/.test(m.text)), 'allowances round down to $5 steps');
+  store.close();
 });

@@ -17,7 +17,9 @@ test('inline crew keeps chat constraints and the selected venue; double clicks c
   c.openCrew({ friends: ['aditya'], placeId: 'chosen', query: 'pizza', draft: { date: '2026-11-02', time: '14:00', allowance: 17 } });
   await Promise.all([c.startCrew(), c.startCrew()]);
   assert.equal(calls.length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), { path: '/plans', body: { date: '2026-11-02', time: '14:00', allowance: 17, title: 'Dinner with the crew', friends: ['aditya'], placeId: 'chosen', query: 'pizza' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), { path: '/plans', body: { date: '2026-11-02', time: '14:00', allowance: 17, title: 'Dinner with the crew', friends: ['aditya'], placeId: 'chosen', query: 'pizza',
+    // The draft conversation carries over to start the adventure's own chat.
+    transcript: [{ role: 'agent', text: 'What would make this a good outing? Tell me the food, day, time, and spending limit you have in mind, then pick your crew.' }] } });
 });
 
 test('failed crew submission reopens the picker for retry', async () => {

@@ -6,7 +6,7 @@ const slot = new URLSearchParams(location.search).get('slot') || 'single';
 const inviteParam = new URLSearchParams(location.search).get('invite');
 const tokenKey = `disco-session-${slot}`;
 const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
-let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', lastChatLen = -1, searchTimer;
+let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', chatLens = {}, searchTimer;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
 const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
@@ -190,7 +190,7 @@ async function login(username, password) {
 
 /* ---------- Navigation ---------- */
 const cur = () => stack.at(-1);
-const routeKey = r => `${stack.length}:${r.name}:${r.id || ''}`;
+const routeKey = r => `${stack.length}:${r.name}:${r.id || r.thread || ''}`;
 function go(name, params = {}) { stack.push({ name, ...params }); load(); render(); }
 function replace(name, params = {}) { stack[stack.length - 1] = { name, ...params }; load(); render(); }
 function back() { if (stack.length > 1) stack.pop(); else stack = [{ name: 'chat' }]; render(); }
@@ -309,7 +309,8 @@ function screen(r) {
   if (r.name === 'chat' && !S.me.onboarded && !ui.skipWelcome) return welcomeScreen();
   const p = r.id ? findPlan(r.id) : null;
   switch (r.name) {
-    case 'chat': return chatScreen();
+    case 'chat': return r.thread ? threadScreen(r) : chatScreen();
+    case 'chats': return chatsScreen();
     case 'adventure-draft': return adventureDraftScreen();
     case 'feed': return feedScreen();
     case 'adventures': return adventuresScreen();
@@ -353,10 +354,51 @@ function chatScreen() {
 
   body += S.matches.map(matchCard).join('');
   const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
-  return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</button>`)}
+  return `${brandbar(`<button class="icon-circle" data-action="chats" aria-label="All chats and adventures">${I.comment}</button><button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</button>`)}
   <main class="content" id="chat-log" data-scroll aria-label="Conversation">${body}</main>
   <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="${working ? 'Add someone, change the time, anything' : 'Where to? Ask or plan anything'}" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>${tabbar('chat')}`;
 }
+/* An adventure's own chat: its plan updates, invitations, and anything said about it, apart from main-chat recommendations. */
+function threadScreen(r) {
+  const t = (S.threads || []).find(x => x.id === r.thread);
+  if (!t) return `${titlebar('Adventure chat')}<main class="content" data-scroll><p class="body-15">This adventure chat isn’t available. It may have been cancelled or you’re no longer on it.</p></main>`;
+  const latest = {}; t.messages.forEach((m, i) => { if (m.planId) latest[m.planId] = i; });
+  const sub = [dparts(t.date).long, t12(t.time), t.place].filter(Boolean).join(' · ');
+  // Invitees only see an adventure once the host approves it, so say so where the host is looking.
+  const p = findPlan(t.id), waiting = p?.isHost && p.state === 'awaiting_approval', invitees = (p?.participants || []).filter(u => !isMe(u)).length;
+  const nudge = waiting ? `<div class="card pad-14 sh-4 col gap-8" role="status"><p class="eyebrow">Waiting for your OK</p><p class="body-14">${invitees === 1 ? 'Your friend can’t' : `Your ${invitees} friends can’t`} see this adventure until you approve it. Nothing goes out until you say go.</p><button class="btn primary h48" style="align-self:flex-start" data-action="approve-open" data-id="${esc(t.id)}">Review &amp; send invites</button></div>` : '';
+  // A stuck adventure (no option fit everyone) offers one-tap changes; each reads like something the host could type.
+  const stuck = p?.isHost && p.state === 'needs_decision' ? `<div class="suggestions" aria-label="Try a change">${stuckReplies(p).map(text => `<button class="label-pill" data-action="thread-prompt" data-text="${esc(text)}" ${pending ? 'disabled' : ''}>${esc(text)}</button>`).join('')}</div>` : '';
+  // At the end, because chats open scrolled to the newest message.
+  let body = '<div style="margin-top:auto"></div>' + t.messages.map((m, i) => message(m, latest[m.planId] === i, i === t.messages.length - 1)).join('') + nudge + stuck;
+  if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
+  return `${titlebar(esc(t.title), { sub, subMuted: true, right: `<button class="pill" data-action="plan" data-id="${esc(t.id)}">Plan</button>` })}
+  <main class="content" id="chat-log" data-scroll aria-label="Adventure conversation">${body}</main>
+  <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent about this adventure</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="Change the time, add someone, anything" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>`;
+}
+// Next day, 90 minutes later (capped at 10 pm), $10 more, or another venue: each phrased the way resolveStuckPlan reads it.
+function stuckReplies(p) {
+  const next = new Date(`${p.option.date}T12:00:00Z`); next.setUTCDate(next.getUTCDate() + 1);
+  const [h, m] = p.option.time.split(':').map(Number), later = Math.min(h * 60 + m + 90, 22 * 60);
+  const laterTime = `${String(Math.floor(later / 60)).padStart(2, '0')}:${String(later % 60).padStart(2, '0')}`;
+  return [`Try ${next.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}`, laterTime !== p.option.time ? `Try ${t12(laterTime)}` : null, `Up to $${Number(p.option.allowance) + 10}`, 'Another place'].filter(Boolean);
+}
+/* Every chat: main (recommendations) plus one per adventure, most recent activity first. */
+function chatsScreen() {
+  const preview = text => text ? `<span class="meta-12" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(text)}</span>` : '';
+  const threads = (S.threads || []).map(t => ({ t, p: findPlan(t.id) })).filter(x => x.p);
+  return `${titlebar('Chats', { size: 't30' })}<main class="content gap-8" data-scroll><ul class="stack" style="gap:18px;padding-top:6px">
+    <li><button class="card row-pad row gap-12" data-action="tab" data-view="chat"><span class="grow stack" style="min-width:0"><span class="body-15 strong">Main chat</span><span class="meta-12">Recommendations and questions</span>${preview(S.chat.at(-1)?.text)}</span>${I.chevron}</button></li>
+    ${threads.length ? '<li><h2 class="eyebrow" style="margin-top:10px">Adventures</h2></li>' : ''}
+    ${threads.map(({ t, p }) => { const st = status(p); return `<li><button class="card row-pad row gap-12" data-action="thread" data-id="${esc(t.id)}"><span class="grow stack" style="min-width:0"><span class="body-15 strong">${esc(t.title)}</span><span class="meta-12">${esc([dparts(t.date).long, t12(t.time), t.place].filter(Boolean).join(' · '))}</span>${preview(t.messages.at(-1)?.text)}</span>${I.chevron}${sticker(st.label, st.cls, { ok: 4, confirmed: -3, cancelled: 3, working: -4 }[st.key] ?? 3)}</button></li>`; }).join('')}
+    ${threads.length ? '' : '<li class="meta">No adventures yet. Start one from Adventures, or ask your agent to plan something with friends.</li>'}</ul></main>`;
+}
+// Main-chat pointer to an adventure's own chat.
+function threadLinkCard(m) {
+  const t = (S.threads || []).find(x => x.id === m.planId);
+  return t ? `<button class="btn primary h48" style="align-self:flex-start" data-action="thread" data-id="${esc(m.planId)}">Open ${esc(t.title)} chat</button>` : '';
+}
+const openChatButton = p => (S.threads || []).some(t => t.id === p.id) ? `<button class="pill" data-action="thread" data-id="${esc(p.id)}">Open chat</button>` : '';
 function message(m, isLatestForPlan, isLast = false) {
   if (m.role === 'user') return `<p class="bubble">${esc(m.text)}</p>`;
   let extra = '';
@@ -367,6 +409,7 @@ function message(m, isLatestForPlan, isLast = false) {
   if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) extra = `<div class="card pad col gap-8"><p class="eyebrow">Your call, always</p><div class="row gap-8"><button class="pill primary" data-action="memory-save">Save to memory</button><button class="pill" data-action="memory-skip">Just this time</button></div></div>`;
   if (m.kind === 'memories') extra = S.me.private.memories.map(mem => `<div class="card row-pad row gap-10"><p class="grow body-14">${esc(mem.text)}</p><button class="pill" data-action="forget" data-id="${esc(mem.id)}">Forget</button></div>`).join('');
   if (m.kind === 'reviewDraft' && m.placeId) extra = `<button class="btn primary h48" data-action="log" data-id="${esc(m.placeId)}" data-rating="${esc(m.rating)}">Log it</button>`;
+  if (m.kind === 'threadLink') extra = threadLinkCard(m);
   if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
   return `<div class="agent-block"><p class="agent-text">${esc(m.text)}</p>${extra}</div>`;
 }
@@ -620,7 +663,7 @@ function workingScreen(p) {
   const list = stops(p.option), reason = p.candidates.find(c => c.place.id === p.option.place.id)?.reason;
   const people = [...p.participants].sort((a, b) => isMe(b) - isMe(a));
   const ready = p.state === 'awaiting_approval' && p.isHost, stuck = p.state === 'needs_decision' && p.isHost;
-  return `${titlebar(esc(p.title), { cls: 'plain', size: 't30', sub, subMuted: true })}
+  return `${titlebar(esc(p.title), { cls: 'plain', size: 't30', sub, subMuted: true, right: openChatButton(p) })}
   <main class="content" data-scroll style="padding-top:18px">
     <section class="card purple pad-14 sh-4"><h2 class="eyebrow">The route so far</h2><p class="h-18" style="margin-top:4px">${esc(list[0].label)} at ${t12(p.option.time, false)}${list[1] ? `, then ${esc(list[1].label.replace(/^(Show at|Then) /, list[1].label.startsWith('Show') ? 'the show at ' : ''))}` : ''}</p>
       ${reason ? `<p class="body-14" style="margin-top:4px;font-size:13px;line-height:18px">${esc(reason)}.</p>` : p.why[0] ? `<p class="body-14" style="margin-top:4px;font-size:13px;line-height:18px">${esc(p.why[0].author.split(' ')[0])} said “${esc(p.why[0].quote)}”</p>` : ''}</section>
@@ -706,7 +749,7 @@ function detailsScreen(p) {
     : ['confirmed', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button><button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
     : ['invited', 'needs_decision'].includes(p.state) ? `<button class="btn primary h48" data-action="change" data-id="${esc(p.id)}">Change something</button>` : '';
   const history = [...p.history].reverse().slice(0, 8);
-  return `${titlebar(esc(p.title), { size: 't30', sub: `${d.short} · ${t12(p.option.time)} · ~$${esc(p.option.allowance)} each` })}
+  return `${titlebar(esc(p.title), { size: 't30', sub: `${d.short} · ${t12(p.option.time)} · ~$${esc(p.option.allowance)} each`, right: openChatButton(p) })}
   <main class="content" data-scroll>${changeBanner}
     <section class="card pad-14 sh-4" style="padding:14px" aria-label="Route"><h2 class="eyebrow" style="margin-bottom:10px">The route</h2>${routeList(p.option, { actions: true, party: p.participants.length })}</section>
     <section aria-label="Who’s going"><h2 class="eyebrow" style="margin-bottom:8px">Who’s going</h2><ul class="who stack gap-8">${p.participants.map(u => `<li>${av(u, 30)}<span class="name">${nameOf(u)}</span>${who(u)}</li>`).join('')}</ul></section>
@@ -860,9 +903,11 @@ function render() {
   $('#app').innerHTML = `<div class="app-shell">${html.includes('class="screen') ? html : `<div class="screen">${html}</div>`}</div>`;
   const main = $('[data-scroll]');
   if (main) {
-    const grew = r.name === 'chat' && (S.chat.length !== lastChatLen || pending);
+    // Each chat (main or an adventure's) jumps to the bottom when it gains messages, and keeps its own scroll otherwise.
+    const msgs = r.name === 'chat' ? (r.thread ? S.threads?.find(t => t.id === r.thread)?.messages : S.chat) || [] : null;
+    const grew = msgs && (msgs.length !== chatLens[key] || pending);
     main.scrollTop = grew ? main.scrollHeight : scrolls[key] || 0;
-    if (r.name === 'chat') lastChatLen = S.chat.length;
+    if (msgs) chatLens[key] = msgs.length;
   }
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); if (selection) try { el.setSelectionRange(...selection); } catch { /* Not a text field. */ } } }
   else if (key !== lastKey && lastKey) { const h = $('h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } }
@@ -874,7 +919,9 @@ function render() {
 async function sendChat(text, planId) {
   if (!planId && /\bnear me\b/i.test(text)) await ensureLocation();
   pending = true; render();
-  try { await api('/chat', { text, planId }); delete drafts.message; await refresh(); } finally { pending = false; render(); }
+  let opened;
+  try { const result = await api('/chat', { text, planId }); delete drafts.message; await refresh(); opened = result.thread; } finally { pending = false; render(); }
+  if (opened) go('chat', { thread: opened }); // the message started an adventure: continue in its own chat
 }
 async function ensureLocation() {
   if (ui.location || ui.locationStatus === 'denied') return;
@@ -888,7 +935,9 @@ async function startCrew() {
   const friends = [...ui.crew.friends]; if (!friends.length) { toast('Pick at least one friend.'); return; }
   const c = ui.crew; if (!c.open || c.busy) return; ui.crew.open = false; render();
   let created = false;
-  try { await api('/plans', { date: S.defaultDate, time: '19:00', allowance: 24, title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew', ...c.draft, friends, placeId: c.placeId || undefined, query: c.query }); created = true; ui.crew = { open: false, friends: new Set() }; tab('chat'); await refresh(); }
+  // The draft conversation becomes the start of the adventure's own chat (trimmed to stay well under the request limit).
+  const transcript = (c.messages || []).slice(-20).map(m => ({ role: m.role, text: String(m.text).slice(0, 500) }));
+  try { const planId = (await api('/plans', { date: S.defaultDate, time: '19:00', allowance: 24, title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew', ...c.draft, friends, placeId: c.placeId || undefined, query: c.query, transcript }))?.planId; created = true; ui.crew = { open: false, friends: new Set() }; await refresh(); tab('chat'); if (planId) go('chat', { thread: planId }); }
   catch (error) { toast(error.message); if (!created) c.open = true; render(); }
 }
 async function sendAdventureDraft(text) {
@@ -965,6 +1014,9 @@ document.addEventListener('click', async event => {
       case 'plan-friend': openCrew({ friends: [id] }); break;
       case 'avatar-remove': await api('/avatar', { remove: true }); toast('Profile photo removed.'); await refresh(); break;
       case 'plan': openPlan(id); break;
+      case 'chats': go('chats'); break;
+      case 'thread-prompt': if (!pending) await sendChat(el.dataset.text, cur().thread); break;
+      case 'thread': go('chat', { thread: id }); break;
       case 'working': case 'details': case 'invite': case 'changed': case 'change': case 'rate': go(action, { id }); break;
       case 'approve-open': go(findPlan(id)?.hasPendingChange ? 'changed' : 'approve', { id }); break;
       case 'approve': { el.disabled = true; const revised = findPlan(id)?.hasPendingChange; await api('/plans/approve', { planId: id, revision: Number(el.dataset.revision) }); await refresh(); replace('details', { id }); toast(revised ? 'Update sent. Anyone already in gets a quick reconfirm.' : 'Invites sent. Each friend hears from their own agent.'); break; }
@@ -1012,7 +1064,7 @@ document.addEventListener('submit', async event => {
   try {
     if (form.id === 'login-form') await login(data.get('username'), data.get('password'));
     if (form.id === 'adventure-draft-form') { const text = String(drafts['adventure-message'] || '').trim(); if (text) await sendAdventureDraft(text); }
-    if (form.id === 'chat-form') { const text = String(drafts.message || '').trim(); if (text && !pending) await sendChat(text); }
+    if (form.id === 'chat-form') { const text = String(drafts.message || '').trim(); if (text && !pending) await sendChat(text, cur().thread); }
     if (form.dataset.form === 'comment') { const key = 'c-' + form.dataset.id, text = String(drafts[key] || '').trim(); if (text) { await api('/comment', { reviewId: form.dataset.id, text }); delete drafts[key]; await refresh(); } }
     if (form.dataset.form === 'tag') { const t = cap(String(drafts.newtag || '').trim()); if (t) ui.logs[form.dataset.id].tags.add(t); delete drafts.newtag; ui.newTag = false; render(); }
     if (form.dataset.form === 'tell') {
