@@ -48,3 +48,7 @@ Use the review form when an item’s name is ambiguous. Local-mode interpretatio
 - Friend profiles and notifications are viewer-scoped public projections; private constraints and raw chat never appear there.
 - Invite links resolve to prepared Disco accounts in the demo; non-user invitations remain deferred.
 - “Near me” uses browser location only when allowed and otherwise clearly labels the seeded OSU fallback.
+
+## Private Adventure draft
+
+From Adventures, choose New or Start an adventure. A temporary private chat lets the host discuss the outing and select the crew. Try “pizza saturday at 8:30 pm under $20 with daniel”. Review the draft, then choose Confirm & move to chat. Only then is a plan created in the main agent chat; invitations still require host approval. Discard abandons the draft. Draft messages are kept only in the browser page memory and disappear on reload or logout; they are not saved as memories or copied into the main conversation.

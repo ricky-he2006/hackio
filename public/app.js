@@ -178,7 +178,7 @@ async function live() {
     if (!controller.signal.aborted) await new Promise(r => setTimeout(r, 2000));
   }
 }
-function logoutLocal() { token = null; S = null; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
+function logoutLocal() { token = null; S = null; ui.crew = { open: false, friends: new Set() }; delete drafts['adventure-message']; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
 async function login(username, password) {
   const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh();
   if (inviteParam) { try { const preview = await api('/invite?from=' + encodeURIComponent(inviteParam)); stack.push({ name: 'invite-preview', id: inviteParam, data: preview }); } catch (error) { toast(error.message); } }
@@ -308,6 +308,7 @@ function screen(r) {
   const p = r.id ? findPlan(r.id) : null;
   switch (r.name) {
     case 'chat': return chatScreen();
+    case 'adventure-draft': return adventureDraftScreen();
     case 'feed': return feedScreen();
     case 'adventures': return adventuresScreen();
     case 'you': return profileScreen();
@@ -347,7 +348,7 @@ function chatScreen() {
   if (ui.locationStatus !== 'live') body += `<p class="meta location-note">Near me uses the OSU demo location until you allow location. <button class="link" data-action="location">Use my location</button></p>`;
   body += S.chat.map((m, i) => message(m, latest[m.planId] === i, i === S.chat.length - 1)).join('');
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
-  if (ui.crew.open) body += crewCard();
+
   body += S.matches.map(matchCard).join('');
   const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
   return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</button>`)}
@@ -401,6 +402,15 @@ function roundingCard(p) {
     ${stuck ? `<p class="body-14">${esc(p.issue || '')}</p>` : ''}<button class="link" style="align-self:flex-start;margin-top:2px" data-action="${ready ? 'approve-open' : 'working'}" data-id="${esc(p.id)}">${ready ? 'See the route' : 'See details'}</button></div>`;
 }
 /* Chat-inline crew picker: replaces the old “pick your crew” form. The host taps friends; agents never add or remove anyone. */
+function adventureDraftScreen() {
+  const c = ui.crew, d = c.draft || {};
+  return `${titlebar('Plan an adventure', { sub: 'Temporary chat · only you and your agent', subMuted: true })}
+    <main class="content" data-scroll><p class="meta">Work out what you want here. Confirm to create the plan in your main chat. Invitations still need your approval.</p>
+    ${(c.messages || []).map(m => `<p class="${m.role === 'user' ? 'bubble' : 'agent-text'}">${esc(m.text)}</p>`).join('')}
+    <section class="card pad-14 col gap-8" aria-label="Draft details"><p class="eyebrow">Your draft</p><p>${esc(d.date || S.defaultDate)} · ${esc(d.time || '19:00')} · up to $${esc(d.allowance ?? 25)} each</p><p class="meta">${esc(c.placeName || c.query)}</p><p class="meta">Final proposed allowances round down to $5 steps.</p></section>
+    ${c.busy ? '<p class="thinking" role="status">Your agent is updating the draft…</p>' : ''}${crewCard()}</main>
+    <form class="composer" id="adventure-draft-form"><label class="sr-only" for="adventure-message">Talk about this adventure</label><input class="field" id="adventure-message" maxlength="2000" autocomplete="off" placeholder="Friday, pizza, under $20…" value="${esc(drafts['adventure-message'] || '')}"><button class="send" aria-label="Send draft message" ${c.busy || !c.open ? 'disabled' : ''}>${I.send}</button></form>`;
+}
 function crewCard() {
   if (!ui.crew.open) return '';
   const friends = S.friends.filter(f => MAIN_IDS.includes(f.id) && f.id !== S.me.id);
@@ -408,7 +418,7 @@ function crewCard() {
   const who = selected.map(id => (S.friends.find(f => f.id === id) || { name: id }).name);
   return `<div class="agent-block"><p class="agent-text">Who’s coming? Tap your crew${ui.crew.placeName ? ` — starting at <span class="strong">${esc(ui.crew.placeName)}</span>` : ''}.</p>
   <div class="card r16 sh-4 col gap-12" style="padding:14px"><div class="row wrap gap-8">${friends.map(f => `<button class="chip h34" aria-pressed="${ui.crew.friends.has(f.id)}" data-action="crew-toggle" data-id="${esc(f.id)}" style="display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 6px">${av(f, 22)} ${esc(first(f))}</button>`).join('')}</div>
-  <div class="row gap-8"><button class="btn primary h50" data-action="crew-start" ${selected.length ? '' : 'disabled'} title="${selected.length ? 'Start the plan' : 'Pick at least one friend'}">${selected.length ? `Round up ${esc(names(who))}` : 'Round them up'}</button><button class="btn h50 fit" data-action="crew-close">Not now</button></div>
+  <div class="row gap-8"><button class="btn primary h50" data-action="crew-start" ${selected.length && !ui.crew.busy ? '' : 'disabled'} title="${selected.length ? 'Start the plan' : 'Pick at least one friend'}">Confirm & move to chat</button><button class="btn h50 fit" data-action="crew-close">Discard</button></div>
   <p class="meta">You pick the people — agents never add or remove anyone. Each friend’s budget and calendar stay with their own agent.</p></div></div>`;
 }
 function matchCard(m) {
@@ -871,12 +881,23 @@ async function ensureLocation() {
 }
 async function createPlan(body) { const { planId } = await api('/plans', body); await refresh(); replaceOrGo('working', { id: planId }); }
 function replaceOrGo(name, params) { if (['change'].includes(cur().name)) replace(name, params); else go(name, params); }
-function openCrew({ friends = [], placeId = null, placeName = null, query = 'restaurants', draft = {} } = {}) { ui.crew = { open: true, friends: new Set(friends), placeId, placeName, query, draft }; tab('chat'); }
+function openCrew({ friends = [], placeId = null, placeName = null, query = 'restaurants', draft = {} } = {}) { ui.crew = { open: true, friends: new Set(friends), placeId, placeName, query, draft, messages: [{ role: 'agent', text: 'What would make this a good outing? Tell me the food, day, time, and spending limit you have in mind, then pick your crew.' }], busy: false }; delete drafts['adventure-message']; go('adventure-draft'); }
 async function startCrew() {
   const friends = [...ui.crew.friends]; if (!friends.length) { toast('Pick at least one friend.'); return; }
-  const c = ui.crew; if (!c.open) return; ui.crew.open = false; render();
-  try { await api('/plans', { date: S.defaultDate, time: '19:00', allowance: 24, title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew', ...c.draft, friends, placeId: c.placeId || undefined, query: c.query }); await refresh(); }
-  catch (error) { toast(error.message); ui.crew.open = true; render(); }
+  const c = ui.crew; if (!c.open || c.busy) return; ui.crew.open = false; render();
+  let created = false;
+  try { await api('/plans', { date: S.defaultDate, time: '19:00', allowance: 24, title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew', ...c.draft, friends, placeId: c.placeId || undefined, query: c.query }); created = true; ui.crew = { open: false, friends: new Set() }; tab('chat'); await refresh(); }
+  catch (error) { toast(error.message); if (!created) c.open = true; render(); }
+}
+async function sendAdventureDraft(text) {
+  const c = ui.crew; if (!c.open || c.busy) return;
+  c.busy = true; render();
+  try {
+    const result = await api('/adventure-draft', { text, draft: { ...c.draft, query: c.query, placeId: c.placeId, friends: [...c.friends] } });
+    if (ui.crew !== c || !c.open) return;
+    c.draft = result.draft; c.query = result.draft.query; c.friends = new Set(result.draft.friends);
+    c.messages.push({ role: 'user', text }, { role: 'agent', text: result.reply }); delete drafts['adventure-message'];
+  } catch (error) { toast(error.message); } finally { c.busy = false; render(); }
 }
 async function finishQuick() {
   const answers = ui.quick?.answers || []; ui.quick = null;
@@ -937,7 +958,7 @@ document.addEventListener('click', async event => {
       case 'crew': openCrew({ placeId: el.dataset.place || null, placeName: el.dataset.placeName || null }); break;
       case 'crew-pick': { const d = S.chat.find(m => m.id === id)?.draft || {}; openCrew({ friends: d.friends || [], placeId: d.placeId || null, placeName: d.place || null, query: d.query || 'restaurants', draft: d }); break; }
       case 'crew-start': await startCrew(); break;
-      case 'crew-close': ui.crew.open = false; render(); break;
+      case 'crew-close': ui.crew = { open: false, friends: new Set() }; delete drafts['adventure-message']; back(); break;
       case 'crew-toggle': { const set = ui.crew.friends; set.has(id) ? set.delete(id) : set.add(id); render(); break; }
       case 'plan-friend': openCrew({ friends: [id] }); break;
       case 'avatar-remove': await api('/avatar', { remove: true }); toast('Profile photo removed.'); await refresh(); break;
@@ -988,6 +1009,7 @@ document.addEventListener('submit', async event => {
   if (submit) submit.disabled = true;
   try {
     if (form.id === 'login-form') await login(data.get('username'), data.get('password'));
+    if (form.id === 'adventure-draft-form') { const text = String(drafts['adventure-message'] || '').trim(); if (text) await sendAdventureDraft(text); }
     if (form.id === 'chat-form') { const text = String(drafts.message || '').trim(); if (text && !pending) await sendChat(text); }
     if (form.dataset.form === 'comment') { const key = 'c-' + form.dataset.id, text = String(drafts[key] || '').trim(); if (text) { await api('/comment', { reviewId: form.dataset.id, text }); delete drafts[key]; await refresh(); } }
     if (form.dataset.form === 'tag') { const t = cap(String(drafts.newtag || '').trim()); if (t) ui.logs[form.dataset.id].tags.add(t); delete drafts.newtag; ui.newTag = false; render(); }

@@ -18,7 +18,7 @@ export function limiter(max, windowMs) {
 const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]', ...(process.env.ALLOWED_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean)]);
 const hostAllowed = host => allowedHosts.has(String(host || '').toLowerCase().replace(/:\d+$/, ''));
 // Routes that can reach a paid model or search provider.
-const modelRoutes = new Set(['/api/chat', '/api/facts', '/api/plans', '/api/plans/revise']);
+const modelRoutes = new Set(['/api/chat', '/api/adventure-draft', '/api/facts', '/api/plans', '/api/plans/revise']);
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 async function body(req, max = 24000) {
   let content = ''; for await (const chunk of req) { content += chunk; if (content.length > max) throw new AppError('Request too large.', 413); }
@@ -117,6 +117,7 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       switch (url.pathname) {
         case '/api/logout': store.logout(token); break;
         case '/api/chat': result = await engine.chat(id, input); break;
+        case '/api/adventure-draft': result = await engine.adventureDraft(id, input); break;
         case '/api/settings': result = engine.settings(id, input); break;
         case '/api/avatar': result = engine.setAvatar(id, input); break;
         case '/api/onboard': result = engine.onboard(id, input); break;
