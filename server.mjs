@@ -32,10 +32,10 @@ function rateLimiter(max, windowMs) {
 const MAX_STREAMS_PER_USER = 6; // the four-phone demo opens one per account; this leaves room for extra tabs
 
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {
-  const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), streams = new Map();
+  const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), mediaLimit = rateLimiter(60, 60_000), streams = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' about:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org https://*.googleusercontent.com; connect-src 'self'; frame-src 'self' about: https://www.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     try {
       if (!url.pathname.startsWith('/api/')) {
@@ -67,6 +67,8 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         if (url.pathname === '/api/state') return json(res, 200, engine.state(id));
         if (url.pathname === '/api/catalog') return json(res, 200, engine.catalog(id, url.searchParams.get('q') || ''));
         if (url.pathname === '/api/place') return json(res, 200, engine.place(id, url.searchParams.get('id')));
+        // Each lookup can be a paid Places call; the browser keeps results for the session, so this only bites on abuse.
+        if (url.pathname === '/api/place-media') { assert(mediaLimit(id), 'Too many photo lookups. Try again in a minute.', 429); return json(res, 200, await engine.placeMedia(url.searchParams.get('id'))); }
         if (url.pathname === '/api/quickrate') return json(res, 200, engine.quickPicks(id));
         if (url.pathname === '/api/recommend') return json(res, 200, engine.recommend(id, url.searchParams.get('q') || 'restaurants'));
         if (url.pathname === '/api/calendar') {
