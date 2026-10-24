@@ -190,7 +190,7 @@ function openPlan(id) { const p = findPlan(id); if (p) go(planRoute(p), { id });
 async function load() {
   const r = cur();
   try {
-    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data); }
+    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data, r.rating); }
     else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
     else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
     else if (r.name === 'facts' && r.placeId && !r.data) r.data = await api('/facts', { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
@@ -290,6 +290,7 @@ function message(m, isLatestForPlan) {
   if (m.kind === 'planDraft') extra = `<button class="btn primary h48" data-action="newplan" data-draft="${esc(m.id)}">Pick your crew</button>`;
   if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) extra = `<div class="card pad col gap-8"><p class="eyebrow">Your call, always</p><div class="row gap-8"><button class="pill primary" data-action="memory-save">Save to memory</button><button class="pill" data-action="memory-skip">Just this time</button></div></div>`;
   if (m.kind === 'memories') extra = S.me.private.memories.map(mem => `<div class="card row-pad row gap-10"><p class="grow body-14">${esc(mem.text)}</p><button class="pill" data-action="forget" data-id="${esc(mem.id)}">Forget</button></div>`).join('');
+  if (m.kind === 'reviewDraft' && m.placeId) extra = `<button class="btn primary h48" data-action="log" data-id="${esc(m.placeId)}" data-rating="${esc(m.rating)}">Log it</button>`;
   if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
   return `<div class="agent-block"><p class="agent-text">${esc(m.text)}</p>${extra}</div>`;
 }
@@ -378,10 +379,10 @@ const safeUrl = url => { try { const u = new URL(url); return ['http:', 'https:'
 
 /* 9 · Log a review */
 const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud'];
-function initLog(p) {
+function initLog(p, suggested) {
   if (ui.logs[p.id]) return;
   const mine = S.myReviews.find(r => r.placeId === p.id);
-  ui.logs[p.id] = { rating: mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
+  ui.logs[p.id] = { rating: suggested ?? mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
   drafts.note = mine && !mine.tags.includes('quick-rate') ? mine.quote : '';
 }
 function logScreen(r) {
@@ -756,7 +757,7 @@ document.addEventListener('click', async event => {
       case 'back': back(); break;
       case 'prompt': tab('chat'); await sendChat(el.dataset.text); break;
       case 'place': go('place', { id }); break;
-      case 'log': go('log', { id }); break;
+      case 'log': go('log', { id, rating: el.dataset.rating ? Number(el.dataset.rating) : undefined }); break;
       case 'catalog': if (el.dataset.replace) replace('catalog', { purpose: 'review', fromLog: true }); else go('catalog', { purpose: el.dataset.purpose || 'review' }); break;
       case 'catalog-pick': if (cur().purpose === 'review') replace('log', { id }); else go('place', { id }); break;
       case 'additem': go('additem'); break;

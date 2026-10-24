@@ -201,3 +201,20 @@ test('rate the night writes plan-tagged reviews that friends see together', asyn
   assert.deepEqual(view.nightRatings.map(r => [r.userId, r.rating]).sort(), [['daniel', 8.5], ['ricky', 9]]);
   assert.ok(engine.state('aditya').feed.some(r => r.userId === 'daniel' && r.quote === 'gnocchi was elite')); store.close();
 });
+
+test('chat never auto-posts a public review; it suggests one without the raw message', async () => {
+  const { store, engine } = setup(); const before = engine.d.reviews.length;
+  await engine.chat('ricky', { text: 'I loved the loft my sister rented, my budget is tight this month' });
+  const draft = engine.user('ricky').chat.at(-1);
+  assert.equal(engine.d.reviews.length, before); assert.equal(draft.kind, 'reviewDraft'); assert.equal(draft.rating, 9.5);
+  assert.ok(!JSON.stringify(draft).includes('budget is tight'));
+  await engine.chat('ricky', { text: 'The sagebrush trail was great' });
+  assert.notEqual(engine.user('ricky').chat.at(-1).kind, 'reviewDraft', 'place names must match whole words'); store.close();
+});
+
+test('a model-picked place is ignored unless it was among the places shown to the model', async () => {
+  const store = new Store({ path: ':memory:' }), unrelated = Object.keys(store.data.places)[0];
+  const engine = new Engine(store, { delay: 0, model: async () => ({ intent: 'review', placeId: unrelated, rating: 2 }) });
+  await engine.chat('ricky', { text: 'It was a moderate sort of day' });
+  assert.notEqual(engine.user('ricky').chat.at(-1).kind, 'reviewDraft'); store.close();
+});
