@@ -38,7 +38,8 @@ const I = {
   caret: svg(14, 14, line('M3 5l4 4 4-4')),
   chevron: svg(16, 16, line('M6 3.5L10.5 8 6 12.5', '#1D1A2F', 2)),
   loop: svg(28, 28, line('M14 4a10 10 0 019.5 7M24 7.5l-.5 3.5-3.5-.5M14 24a10 10 0 01-9.5-7M4 20.5l.5-3.5 3.5.5'), 'style="flex-shrink:0"'),
-  gear: svg(20, 20, '<circle cx="10" cy="10" r="2.75" fill="none" stroke="#1D1A2F" stroke-width="2"/>' + line('M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6', '#1D1A2F', 2))
+  // A toothed cog (Lucide "settings", ISC licence, drawn on a 24 grid). The old ring-and-rays read as a theme/sun icon.
+  gear: svg(20, 20, '<g transform="scale(0.8333)">' + line('M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z', '#1D1A2F', 2.2) + '<circle cx="12" cy="12" r="3" fill="none" stroke="#1D1A2F" stroke-width="2.2"/></g>')
 };
 const ball = (size = 26) => `<img src="/disco-ball.png" width="${size}" height="${size}" alt="" aria-hidden="true">`;
 
@@ -53,7 +54,10 @@ const firstRaw = u => (u?.name || '').split(' ')[0];
 const first = u => esc(firstRaw(u));
 const nameOf = u => S && u?.id === S.me.id ? 'You' : first(u);
 const isMe = u => S && u?.id === S.me.id;
-const av = (u, size = 34, cls = '') => `<span class="av ${cls}" aria-hidden="true" style="--s:${size}px;--f:${size <= 24 ? 10.5 : size <= 30 ? 12 : size <= 34 ? 13 : size <= 38 ? 14 : 15}px;--bg:${colorOf(u)}">${esc((u?.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+// A person's uploaded photo, or a placeholder silhouette on their colour.
+const SILHOUETTE = '<svg class="av-sil" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="12" r="6.2"/><path d="M3.5 33c0-7.2 5.6-12.4 12.5-12.4S28.5 25.8 28.5 33z"/></svg>';
+const avatarFace = u => u?.avatar ? `<img class="av-img" src="${esc(u.avatar)}" alt="">` : SILHOUETTE;
+const av = (u, size = 34, cls = '') => `<span class="av ${cls}" aria-hidden="true" style="--s:${size}px;--bg:${colorOf(u)}">${avatarFace(u)}</span>`;
 const avStack = (users, size = 30, overlap = -8) => `<span class="av-stack" style="--o:${overlap}px">${users.map(u => av(u, size)).join('')}</span>`;
 const names = list => list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
 const initials = name => esc(String(name || '').split(/\s+/).filter(w => /^[A-Za-z0-9]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join(''));
@@ -197,7 +201,11 @@ async function load() {
     else if (r.name === 'friend-profile' && !r.data) r.data = await api('/profile?id=' + encodeURIComponent(r.id));
     else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
     else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
-    else if (r.name === 'facts' && r.placeId && !r.data) r.data = await api('/facts', { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
+    else if (r.name === 'facts' && !r.data) {
+      // A plan's details are checked for its own venue, date and time (fresh, not the copy saved during negotiation).
+      const plan = r.planId && findPlan(r.planId);
+      r.data = await api('/facts', plan ? { placeId: plan.option.place.id, date: plan.option.date, time: plan.option.time } : { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
+    }
     else return;
     if (cur() === r) render();
   } catch (error) { toast(error.message); }
@@ -242,7 +250,7 @@ const media = new Map();
 function requestMedia(id) {
   if (!S?.media || !id || media.has(id)) return;
   media.set(id, null);
-  api('/place-media?id=' + encodeURIComponent(id)).then(m => { media.set(id, m); if (m.photo || m.address) render(); }).catch(() => {});
+  api('/place-media?id=' + encodeURIComponent(id)).then(m => { media.set(id, m); render(); }).catch(() => { media.set(id, { photo: null, address: null, attribution: null }); render(); }); // settle either way so the loading tile gives way
 }
 // Eager: one place on screen (place page header, address). Lists use lazy photos below instead.
 function placeMedia(p) { requestMedia(p?.id); return media.get(p?.id) ?? null; }
@@ -256,10 +264,18 @@ function observePhotos() {
 // Google requires crediting the photographer wherever a Places photo appears outside a Google map.
 const photoHtml = m => m?.photo ? `<img class="place-photo" src="${safeUrl(m.photo)}" alt="" referrerpolicy="no-referrer">${m.attribution ? `<small class="photo-attr">Photo: ${esc(m.attribution)} · Google</small>` : ''}` : '';
 // Thumbnails are too small for an overlaid credit, so cards that use one print it as a line instead.
-const photoCredit = p => { const m = media.get(p.id); return m?.photo && m.attribution ? `<p class="meta-12">Photo: ${esc(m.attribution)} · Google</p>` : ''; };
-// The place page header: the Google photo when there is one, otherwise the name's initials (Details already has a map).
-const heroPhoto = p => photoHtml(placeMedia(p)).replace('class="place-photo"', 'class="hero-photo"') || `<span aria-hidden="true">${initials(p.name)}</span>`;
-const photoInner = (p, withPhoto) => (withPhoto && photoHtml(media.get(p.id))) || mapSnip(p) || `<span>${initials(p.name)}</span>`;
+// tag: 'span' where a paragraph isn't allowed (e.g. inside a button).
+const photoCredit = (p, tag = 'p') => { const m = media.get(p.id); return m?.photo && m.attribution ? `<${tag} class="meta-12">Photo: ${esc(m.attribution)} · Google</${tag}>` : ''; };
+// The place page header: the Google photo when there is one; once a lookup finds none (~7% of venues), the initials
+// with a "Photo not found" note. Details below already has the map.
+const heroPhoto = p => { const m = placeMedia(p); return photoHtml(m).replace('class="place-photo"', 'class="hero-photo"') || `<span aria-hidden="true">${initials(p.name)}</span>${m && !m.photo ? '<p class="hero-note">Photo not found</p>' : ''}`; };
+// With a Places key, cards never show a map: a shimmering tile while the photo is coming, the photo when it arrives,
+// and a plain initials tile if Google has none. Map snippets remain only for setups without a Places key.
+const photoInner = (p, withPhoto) => {
+  if (!(withPhoto && S?.media && p.provenance !== 'Added by a user')) return mapSnip(p) || `<span>${initials(p.name)}</span>`;
+  const m = media.get(p.id);
+  return m == null ? `<span class="photo-loading">${initials(p.name)}</span>` : photoHtml(m) || `<span>${initials(p.name)}</span>`;
+};
 // Large images show the photo by default. Small sizes hide the overlaid credit, so they only use a photo when the
 // caller opts in and prints photoCredit(p) on the card; otherwise they keep the map snippet.
 const SMALL = /\b(thumb|cover|t72)\b/;
@@ -334,14 +350,14 @@ function chatScreen() {
   if (ui.crew.open) body += crewCard();
   body += S.matches.map(matchCard).join('');
   const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
-  return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile">${esc(S.me.name.charAt(0))}</button>`)}
+  return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</button>`)}
   <main class="content" id="chat-log" data-scroll aria-label="Conversation">${body}</main>
   <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="${working ? 'Add someone, change the time, anything' : 'Where to? Ask or plan anything'}" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>${tabbar('chat')}`;
 }
 function message(m, isLatestForPlan, isLast = false) {
   if (m.role === 'user') return `<p class="bubble">${esc(m.text)}</p>`;
   let extra = '';
-  if (m.kind === 'recommendations') { const picks = (m.picks || []).slice(0, 3); extra = picks.map((r, i) => recCard(r, i === 0)).join(''); }
+  if (m.kind === 'recommendations') { const picks = (m.picks || []).slice(0, 3); extra = picks.length ? picks.map((r, i) => recCard(r, i === 0)).join('') : (m.unvouched || []).map(unvouchedCard).join(''); }
   if (m.kind === 'planStart') { const p = findPlan(m.planId); extra = `<div class="row wrap gap-8">${(m.friends || []).map(u => `<span class="party-chip">${av(u, 28)}${first(u)}</span>`).join('')}</div><p class="agent-text">Rounding them up now. Nothing goes out until you say go.</p>${p && isLatestForPlan ? planAttachment(p) : ''}`; }
   if (m.kind === 'plan') { const p = findPlan(m.planId); if (p && isLatestForPlan) extra = planAttachment(p); }
   if (m.kind === 'planDraft' && isLast && !ui.crew.open) extra = `<button class="btn primary h48" data-action="crew-pick" data-id="${esc(m.id)}">Pick your crew</button>`;
@@ -350,6 +366,11 @@ function message(m, isLatestForPlan, isLast = false) {
   if (m.kind === 'reviewDraft' && m.placeId) extra = `<button class="btn primary h48" data-action="log" data-id="${esc(m.placeId)}" data-rating="${esc(m.rating)}">Log it</button>`;
   if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
   return `<div class="agent-block"><p class="agent-text">${esc(m.text)}</p>${extra}</div>`;
+}
+// Shown only when no friend has vouched for the cuisine asked for; the label keeps the friend-backed promise honest.
+function unvouchedCard(p) {
+  return `<article class="card pad sh-4 row top gap-12">${photo(p, '', 't72', true, true)}<div class="col gap-4 grow" style="min-width:0"><div><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${meta([distance(p), hoursLabel(p)]) || esc(p.area || '')}</p></div>
+    <p><span class="label-pill">Not vouched by friends yet</span></p>${photoCredit(p)}</div></article>`;
 }
 function recCard(rec, big) {
   const p = rec.place, q = rec.reviews[0], who = names(rec.reviews.map(r => nameOf(r.author)));
@@ -478,7 +499,7 @@ function logScreen(r) {
   const st = ui.logs[p.id], tags = [...new Set([...TAGS, ...st.tags])];
   return `${titlebar('Log it', { close: true, cls: 'inline', size: 't24' })}
   <main class="content gap-22" data-scroll>
-    <div class="card row gap-12" style="padding:10px 12px">${photo(p, '', 'thumb', false)}<div class="grow"><p class="h-18">${esc(p.name)}</p><p class="meta">${meta([typeTag(p)[0], p.area])}</p></div><button class="pill text" data-action="catalog" data-purpose="review" data-replace="1">Change</button></div>
+    <div class="card row gap-12" style="padding:10px 12px">${photo(p, '', 'thumb', false, true)}<div class="grow"><p class="h-18">${esc(p.name)}</p><p class="meta">${meta([typeTag(p)[0], p.area])}</p>${photoCredit(p)}</div><button class="pill text" data-action="catalog" data-purpose="review" data-replace="1">Change</button></div>
     <section class="card r16 pad-16 sh-4 col gap-14"><div class="row between"><label for="rating" class="h-21">Your rating</label><span id="rate-bubble" class="score s68 ${scoreCls(st.rating)}" aria-hidden="true">${st.rating.toFixed(1)}</span></div>
       ${slider('rating', st.rating, 'Your rating', 'rate-bubble')}<div class="scale" aria-hidden="true"><span>0 · Skip it</span><span>5 · Fine</span><span>10 · Go now</span></div></section>
     <section class="stack gap-8"><label for="note" class="field-label">Note for friends</label><textarea id="note" class="textarea hand" style="height:96px" maxlength="2000" placeholder="What would you tell a friend?">${esc(drafts.note || '')}</textarea></section>
@@ -493,7 +514,7 @@ function catalogScreen(r) {
   const results = r.data || [];
   return `${titlebar(r.purpose === 'review' ? 'What did you try?' : 'Find something', { size: 't30' })}
   <main class="content" data-scroll><div class="search">${I.search('#5E5873')}<label class="sr-only" for="catalog-q">Search places and things</label><input id="catalog-q" placeholder="Search places, albums, shows…" autocomplete="off" value="${esc(drafts['catalog-q'] || '')}"></div>
-    <ul class="stack gap-8">${results.map(p => `<li><button class="card row-pad row gap-12" data-action="catalog-pick" data-id="${esc(p.id)}">${photo(p, '', 'thumb', false)}<span class="grow stack"><span class="row gap-8"><span class="body-15 strong">${esc(p.name)}</span>${tagPill(p)}</span><span class="meta-12">${meta([p.area, p.reviewCount ? `${p.reviewCount} from your circle` : ''])}</span></span>${I.chevron}</button></li>`).join('') || (r.data ? '<li class="meta">No match yet. Add it below.</li>' : '<li class="meta">Loading…</li>')}</ul>
+    <ul class="stack gap-8">${results.map(p => `<li><button class="card row-pad row gap-12" data-action="catalog-pick" data-id="${esc(p.id)}">${photo(p, '', 'thumb', false, true)}<span class="grow stack"><span class="row gap-8"><span class="body-15 strong">${esc(p.name)}</span>${tagPill(p)}</span><span class="meta-12">${meta([p.area, p.reviewCount ? `${p.reviewCount} from your circle` : ''])}</span>${photoCredit(p, 'span')}</span>${I.chevron}</button></li>`).join('') || (r.data ? '<li class="meta">No match yet. Add it below.</li>' : '<li class="meta">Loading…</li>')}</ul>
     <button class="btn dashed h48" data-action="additem">${I.plus} Add something else</button></main>`;
 }
 function addItemScreen() {
@@ -514,7 +535,8 @@ function profileScreen() {
   const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const interests = String(S.me.private.interests || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
   return `<section class="profile-head"><button class="icon-circle gear" data-action="settings" aria-label="Settings and privacy">${I.gear}</button>
-    <div class="row gap-14"><div class="big-av" aria-hidden="true">${esc(S.me.name.charAt(0))}</div><div class="grow"><h1>${esc(S.me.name)}</h1><p class="body-14 semi" style="margin-top:2px">${esc([S.me.area, cap(interests)].filter(Boolean).join(' · '))}</p></div></div>
+    <div class="row gap-14"><div class="big-av" aria-hidden="true" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</div><div class="grow"><h1>${esc(S.me.name)}</h1><p class="body-14 semi" style="margin-top:2px">${esc([S.me.area, cap(interests)].filter(Boolean).join(' · '))}</p>
+      <div class="row gap-8" style="margin-top:8px"><label class="pill sm-text" for="avatar-input">${S.me.avatar ? 'Change photo' : 'Add photo'}</label><input id="avatar-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>${S.me.avatar ? '<button class="pill sm-text" data-action="avatar-remove">Remove</button>' : ''}</div></div></div>
     <dl class="stats"><div><dd><strong>${been.length}</strong></dd><dt><span>Been</span></dt></div><div><dd><strong>${want.length}</strong></dd><dt><span>Want to try</span></dt></div><a href="#" data-action="friends"><strong>${S.friends.length}</strong><span>Friends</span></a><div><dd><strong>${S.plans.length}</strong></dd><dt><span>Adventures</span></dt></div></dl></section>
   <div class="seg" role="tablist" aria-label="Your places" style="margin:14px 20px 0 16px"><button role="tab" aria-selected="${ui.ptab === 'been'}" data-action="ptab" data-value="been">Been</button><button role="tab" aria-selected="${ui.ptab === 'want'}" data-action="ptab" data-value="want">Want to try</button></div>
   <div class="row between gap-12" style="position:relative;z-index:2;flex-shrink:0;padding:14px 20px 0 16px"><span id="cat-label" class="eyebrow">${ui.ptab === 'been' ? 'Your ratings for' : 'Saved in'}</span>
@@ -782,8 +804,23 @@ function rateScreen(p) {
 }
 
 /* Facts */
+// Venue details from Google's listing: open/closed at the planned time, the week's hours, price range, and contact links.
+function googleFactsScreen(f) {
+  const when = f.date ? `${dparts(f.date).long} at ${ampm(f.time)}` : '';
+  const status = f.open === true ? sticker('Open then', 'green static', -2) : f.open === false ? sticker('Closed then', 'coral static', -2) : sticker('Hours not listed', 'yellow static', -2);
+  const hours = String(f.hours || '').split('\n').filter(Boolean);
+  const phone = String(f.phone || '').replace(/[^\d+]/g, '');
+  return `${titlebar('Venue details', { size: 't30' })}<main class="content gap-16" data-scroll>
+    <div class="row gap-10" style="align-items:center">${status}${when ? `<p class="meta">${esc(when)}</p>` : ''}</div>
+    <p class="facts-summary">${esc(f.summary)}</p>
+    ${hours.length ? `<section class="stack gap-6"><h2 class="eyebrow">Opening hours</h2><ul class="stack gap-4">${hours.map(h => `<li class="body-14">${esc(h)}</li>`).join('')}</ul></section>` : ''}
+    ${f.price != null ? `<section class="stack gap-6"><h2 class="eyebrow">Price</h2><p class="body-14">$${esc(f.price)}${f.priceHigh != null ? `–${esc(f.priceHigh)}` : '+'} per person</p></section>` : ''}
+    <div class="row wrap gap-8">${f.website ? `<a class="pill" href="${safeUrl(f.website)}" target="_blank" rel="noopener noreferrer">Website ↗</a>` : ''}${phone ? `<a class="pill" href="tel:${esc(phone)}">Call ${esc(f.phone)}</a>` : ''}${(f.sources || []).map(s => `<a class="pill" href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a>`).join('')}</div>
+    <p class="meta-12">Details from Google Maps · checked ${new Date(f.checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Hours can change; confirm with the venue for holidays.</p></main>`;
+}
 function factsScreen(r) {
-  const facts = r.planId ? findPlan(r.planId)?.facts : r.data;
+  const facts = r.data;
+  if (facts?.provider === 'google') return googleFactsScreen(facts);
   return `${titlebar('Venue details', { size: 't30' })}<main class="content" data-scroll>${!facts ? `<div class="thinking"><i></i><i></i><i></i><span>Checking hours, prices and menu options…</span></div>`
     : `${sticker(facts.status === 'sourced' ? 'Sources found' : 'Not verified', facts.status === 'sourced' ? 'green static' : 'yellow static', -2)}<p class="facts-summary">${esc(facts.summary || 'No live details yet.')}</p>${facts.checkedAt ? `<p class="meta">Checked ${new Date(facts.checkedAt).toLocaleTimeString()}</p>` : ''}
     <div class="source-list">${(facts.sources || []).map(s => `<a class="link" href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a>`).join('')}</div>${facts.searchSuggestions ? `<iframe class="search-suggestions" title="Google Search suggestions" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(facts.searchSuggestions)}"></iframe>` : ''}`}</main>`;
@@ -902,6 +939,7 @@ document.addEventListener('click', async event => {
       case 'crew-close': ui.crew.open = false; render(); break;
       case 'crew-toggle': { const set = ui.crew.friends; set.has(id) ? set.delete(id) : set.add(id); render(); break; }
       case 'plan-friend': openCrew({ friends: [id] }); break;
+      case 'avatar-remove': await api('/avatar', { remove: true }); toast('Profile photo removed.'); await refresh(); break;
       case 'plan': openPlan(id); break;
       case 'working': case 'details': case 'invite': case 'changed': case 'change': case 'rate': go(action, { id }); break;
       case 'approve-open': go(findPlan(id)?.hasPendingChange ? 'changed' : 'approve', { id }); break;
@@ -969,7 +1007,17 @@ document.addEventListener('input', event => {
   if (el.id === 'friend-q' || el.id === 'people-q') render();
   if (el.id === 'catalog-q') { clearTimeout(searchTimer); searchTimer = setTimeout(async () => { const r = cur(); if (r.name !== 'catalog') return; try { r.data = await api('/catalog?q=' + encodeURIComponent(el.value)); render(); } catch (error) { toast(error.message); } }, 250); }
 });
-document.addEventListener('change', event => { if (event.target.matches('[data-slider][data-night]')) updateSlider(event.target); });
+document.addEventListener('change', event => { if (event.target.matches('[data-slider][data-night]')) updateSlider(event.target); if (event.target.id === 'avatar-input') uploadAvatar(event.target.files[0]); });
+// Crops to a centred square and shrinks to 256 px in the browser, so an upload is ~20 KB whatever the phone camera made.
+async function uploadAvatar(file) {
+  if (!file) return;
+  try {
+    const bitmap = await createImageBitmap(file), side = Math.min(bitmap.width, bitmap.height), canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 256, 256);
+    await api('/avatar', { image: canvas.toDataURL('image/jpeg', 0.85) }); toast('Profile photo updated.'); await refresh();
+  } catch (error) { toast(/decode|source image/i.test(error.message) ? 'That file isn’t an image we can use.' : error.message); }
+}
 document.addEventListener('toggle', event => { const d = event.target; if (d.matches?.('details[data-key]')) d.open ? ui.open.add(d.dataset.key) : ui.open.delete(d.dataset.key); }, true);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { if (ui.catOpen) { ui.catOpen = false; render(); } else if (S && stack.length > 1 && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) back(); }

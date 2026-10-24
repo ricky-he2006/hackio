@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelJson, searchPlace, googlePlace } from '../lib/providers.mjs';
+import { modelJson, searchPlace, googlePlace, venueDetails, openAt } from '../lib/providers.mjs';
 
 test('Gemini and NVIDIA adapters make the documented structured requests', async () => {
   const saved = { ...process.env }, originalFetch = globalThis.fetch, requests = [];
@@ -62,9 +62,37 @@ test('Google Places lookup: biased text search, rejects far-away matches, return
     const venue = { name: 'Late Night Desserts', lat: 39.9969046, lon: -83.0067949 };
     assert.deepEqual(await googlePlace(venue), { id: 'gid-9', address: '1871 N High St, Columbus, OH 43210', photo: 'https://lh3.googleusercontent.com/places/abc', attribution: 'Sam' });
     assert.equal(requests[0].headers['X-Goog-Api-Key'], 'test-server-key'); assert.equal(requests[0].body.textQuery, 'Late Night Desserts, Columbus, OH');
-    assert.equal(requests[0].body.locationBias.circle.radius, 200); assert.equal(requests[0].headers['X-Goog-FieldMask'], 'places.id', 'ID-only search is the free tier');
+    assert.ok(requests[0].body.locationRestriction.rectangle.low.latitude < venue.lat && requests[0].body.locationRestriction.rectangle.high.latitude > venue.lat, 'search is restricted to a box around the venue'); assert.equal(requests[0].headers['X-Goog-FieldMask'], 'places.id', 'ID-only search is the free tier');
     assert.equal(requests[1].headers['X-Goog-FieldMask'], 'id,formattedAddress,location,photos'); assert.match(requests[2].url, /photos\/abc\/media\?maxWidthPx=640&skipHttpRedirect=true$/);
     far = true; assert.equal(await googlePlace(venue), null, 'a match ~11 km away is a different business');
     far = false; assert.equal((await googlePlace({ ...venue, lat: venue.lat + 0.0027 })).id, 'gid-9', 'a pin ~300 m off (OSM mid-block placement) still matches');
+  } finally { globalThis.fetch = originalFetch; console.warn = warn; if (saved.GOOGLE_PLACES_KEY === undefined) delete process.env.GOOGLE_PLACES_KEY; else process.env.GOOGLE_PLACES_KEY = saved.GOOGLE_PLACES_KEY; }
+});
+
+test('openAt reads Google opening periods, including closed days, overnight hours, and 24-hour venues', () => {
+  const at = (h, m = 0) => h * 60 + m, sat = 6, sun = 0, mon = 1;
+  const periods = [{ open: { day: sat, hour: 11, minute: 0 }, close: { day: sat, hour: 21, minute: 0 } }, { open: { day: sat, hour: 22, minute: 0 }, close: { day: sun, hour: 2, minute: 0 } }];
+  assert.equal(openAt(periods, sat, at(19)), true); assert.equal(openAt(periods, sat, at(21, 30)), false);
+  assert.equal(openAt(periods, sun, at(1)), true, 'Saturday night runs past midnight'); assert.equal(openAt(periods, mon, at(12)), false, 'no Monday hours');
+  assert.equal(openAt([{ open: { day: 0, hour: 0, minute: 0 } }], mon, at(3)), true, 'open 24 hours'); assert.equal(openAt([], sat, at(19)), null, 'no hours listed');
+  assert.equal(openAt([{ open: { day: sat, hour: 18, minute: 0 }, close: { day: sun, hour: 1, minute: 0 } }], sun, at(0, 30)), true, 'wraps across the week boundary');
+});
+
+test('venue details come from the Google listing: open at the plan time, low-end price, far matches rejected', async () => {
+  const saved = { ...process.env }, originalFetch = globalThis.fetch, warn = console.warn; let far = false;
+  process.env.GOOGLE_PLACES_KEY = 'test-server-key'; console.warn = () => {};
+  globalThis.fetch = async url => {
+    if (String(url).endsWith(':searchText')) return Response.json({ places: [{ id: 'gid-7' }] });
+    return Response.json({ location: far ? { latitude: 40.2, longitude: -83 } : { latitude: 39.987, longitude: -83.003 }, businessStatus: 'OPERATIONAL',
+      regularOpeningHours: { periods: [{ open: { day: 6, hour: 11, minute: 0 }, close: { day: 6, hour: 21, minute: 0 } }], weekdayDescriptions: ['Monday: Closed', 'Saturday: 11:00 AM – 9:00 PM'] },
+      priceRange: { startPrice: { currencyCode: 'USD', units: '10' }, endPrice: { currencyCode: 'USD', units: '30' } }, servesVegetarianFood: true, websiteUri: 'https://example.test', googleMapsUri: 'https://maps.google.com/?cid=1' });
+  };
+  try {
+    const venue = { name: 'Artisan Pizza Cafe', lat: 39.9868535, lon: -83.0029106 };
+    const { id, facts } = await venueDetails(venue, undefined, '2026-10-31', '19:00');
+    assert.equal(id, 'gid-7'); assert.equal(facts.status, 'sourced'); assert.equal(facts.open, true); assert.equal(facts.price, 10, 'budget checks use the low end'); assert.equal(facts.priceHigh, 30);
+    assert.deepEqual(facts.dietary, ['vegetarian']); assert.match(facts.summary, /^Open at the planned time\. Saturday: 11:00 AM – 9:00 PM\. Typical spend \$10–30/);
+    assert.equal((await venueDetails(venue, 'gid-7', '2026-10-31', '22:00')).facts.open, false, 'closed after 9pm');
+    far = true; assert.equal((await venueDetails(venue, undefined, '2026-10-31', '19:00')).facts.status, 'unavailable', 'a far-away match is not this venue');
   } finally { globalThis.fetch = originalFetch; console.warn = warn; if (saved.GOOGLE_PLACES_KEY === undefined) delete process.env.GOOGLE_PLACES_KEY; else process.env.GOOGLE_PLACES_KEY = saved.GOOGLE_PLACES_KEY; }
 });

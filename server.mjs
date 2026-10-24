@@ -9,8 +9,8 @@ import { providerStatus, checkProvider } from './lib/providers.mjs';
 const publicDir = resolve('public');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
-async function body(req) {
-  let content = ''; for await (const chunk of req) { content += chunk; if (content.length > 24000) throw new AppError('Request too large.', 413); }
+async function body(req, max = 24000) {
+  let content = ''; for await (const chunk of req) { content += chunk; if (content.length > max) throw new AppError('Request too large.', 413); }
   try { return content ? JSON.parse(content) : {}; } catch { throw new AppError('Invalid JSON.'); }
 }
 function calendar(p) {
@@ -32,7 +32,7 @@ function rateLimiter(max, windowMs) {
 const MAX_STREAMS_PER_USER = 6; // the four-phone demo opens one per account; this leaves room for extra tabs
 
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {
-  const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), mediaLimit = rateLimiter(60, 60_000), streams = new Map();
+  const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), mediaLimit = rateLimiter(60, 60_000), avatarLimit = rateLimiter(10, 60_000), streams = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org https://*.googleusercontent.com; connect-src 'self'; frame-src 'self' about: https://www.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
@@ -48,6 +48,11 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       }
       if (req.method !== 'GET' && req.headers.origin) assert(req.headers.origin === `http://${req.headers.host}` || req.headers.origin === `https://${req.headers.host}`, 'Cross-origin request rejected.', 403);
       if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus() });
+      // Public so the login screen can show faces before sign-in. Only stored, signature-checked images are served.
+      if (url.pathname === '/api/avatar' && req.method === 'GET') {
+        const avatar = store.avatar(url.searchParams.get('id')); assert(avatar, 'Not found.', 404);
+        res.writeHead(200, { 'content-type': avatar.type, 'content-length': avatar.data.length, 'cache-control': 'public, max-age=31536000, immutable' }); return res.end(req.method === 'HEAD' ? undefined : avatar.data);
+      }
       if (url.pathname === '/api/accounts' && req.method === 'GET') return json(res, 200, MAIN_IDS.map(id => publicUser(store.data.users[id])));
       if (url.pathname === '/api/login' && req.method === 'POST') {
         assert(loginLimit(req.socket.remoteAddress), 'Too many login attempts. Try again in a minute.', 429);
@@ -84,11 +89,14 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
           res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'attachment; filename="disco-plan.ics"' }); return res.end(calendar(p));
         }
       }
-      assert(req.method === 'POST', 'Not found.', 404); const input = await body(req); let result = { ok: true };
+      assert(req.method === 'POST', 'Not found.', 404);
+      if (url.pathname === '/api/avatar') assert(avatarLimit(id), 'Too many photo uploads. Try again in a minute.', 429);
+      const input = await body(req, url.pathname === '/api/avatar' ? 300_000 : 24000); let result = { ok: true };
       switch (url.pathname) {
         case '/api/logout': store.logout(token); break;
         case '/api/chat': result = await engine.chat(id, input); break;
         case '/api/settings': result = engine.settings(id, input); break;
+        case '/api/avatar': result = engine.setAvatar(id, input); break;
         case '/api/onboard': result = engine.onboard(id, input); break;
         case '/api/temporary/clear': user.temporary = {}; user.pendingMemory = null; store.save(); break;
         case '/api/memory': result = engine.memory(id, input); break;

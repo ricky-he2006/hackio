@@ -562,3 +562,58 @@ test('place media stores only Google place IDs, reuses them, and skips user-adde
     const userItem = engine.addItem('ricky', { name: 'My spot', category: 'Places' }); await engine.placeMedia(userItem.id); assert.equal(calls.length, 3, 'user-added items never reach Google');
   } finally { if (saved === undefined) delete process.env.GOOGLE_PLACES_KEY; else process.env.GOOGLE_PLACES_KEY = saved; store.close(); }
 });
+
+test('profile photos: only real JPEG/PNG/WebP bytes are accepted, served publicly by versioned URL, and removable', async t => {
+  const { store, engine } = setup();
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+  const dataUrl = (type, buf) => `data:${type};base64,${buf.toString('base64')}`;
+  assert.throws(() => engine.setAvatar('ricky', { image: dataUrl('image/png', Buffer.from('<svg onload="alert(1)"/>')) }), /JPEG, PNG, or WebP/, 'an SVG labelled as PNG is rejected');
+  assert.throws(() => engine.setAvatar('ricky', { image: dataUrl('image/jpeg', Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(200_001)])) }), /too large/);
+  const { avatar } = engine.setAvatar('ricky', { image: dataUrl('image/png', png) });
+  assert.match(avatar, /^\/api\/avatar\?id=ricky&v=[0-9a-f]{8}$/); assert.equal(engine.state('aditya').friends.find(f => f.id === 'ricky').avatar, avatar, 'friends see the photo');
+  const { server } = createApp({ store, engine }); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const res = await fetch(base + avatar); assert.equal(res.status, 200); assert.equal(res.headers.get('content-type'), 'image/png'); assert.deepEqual(Buffer.from(await res.arrayBuffer()), png);
+  assert.equal((await fetch(base + '/api/accounts').then(r => r.json())).find(u => u.id === 'ricky').avatar, avatar, 'the login screen gets it before sign-in');
+  assert.equal((await fetch(base + '/api/avatar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: dataUrl('image/png', png) }) })).status, 401, 'uploading needs a login');
+  engine.setAvatar('ricky', { remove: true }); assert.equal(engine.user('ricky').avatarVersion, null); assert.equal((await fetch(base + avatar)).status, 404);
+});
+
+test('a named cuisine filters friend picks; with none, the agent says so and shows labelled unvouched spots', async () => {
+  const { store, engine } = setup(); const isIndian = p => /\bindian\b/i.test(`${p.name} ${p.tags.join(' ')}`);
+  assert.deepEqual(engine.cuisinesIn('can you find me a good indian spot?'), ['indian']); assert.deepEqual(engine.cuisinesIn('find restaurants my friends love'), []);
+  assert.equal(engine.recommend('ricky', 'indian restaurant').length, 0, 'no friend has reviewed an Indian place');
+  await engine.chat('ricky', { text: 'indian food please' });
+  const message = engine.state('ricky').chat.at(-1);
+  assert.match(message.text, /None of your friends have vouched for an Indian spot yet/); assert.equal(message.picks.length, 0);
+  assert.ok(message.unvouched.length > 0 && message.unvouched.every(isIndian), 'only Indian venues are suggested');
+  const circle = new Set(engine.visibleReviews('ricky').map(r => r.placeId)); assert.ok(message.unvouched.every(p => !circle.has(p.id)), 'only venues nobody in the circle reviewed');
+  engine.review('aditya', { placeId: message.unvouched[0].id, rating: 9, quote: 'Best biryani near campus.', tags: [] });
+  const picks = engine.recommend('ricky', 'indian restaurant'); assert.equal(picks.length, 1); assert.equal(picks[0].place.id, message.unvouched[0].id, 'the vouched Indian spot, and nothing Italian');
+  assert.equal(engine.recommend('ricky', 'restaurants').length, 3, 'requests without a cuisine are unchanged');
+  const { planId } = engine.createPlan('ricky', { friends: ['daniel'], query: 'thai dinner', date: nextSaturday(), time: '19:00', allowance: 24 }); assert.ok(planId, 'plans still get candidates when no friend reviewed that cuisine');
+  await engine.jobs.get(planId); store.close();
+});
+
+test('Google venue facts stay in memory (never the saved DB), are reused for 15 minutes, and a closed venue makes the planner object', async () => {
+  const saved = process.env.GOOGLE_PLACES_KEY; process.env.GOOGLE_PLACES_KEY = 'test-server-key';
+  const { store, engine } = setup(); let calls = 0, open = true;
+  engine.details = async (_place, knownId) => { calls++; return { id: 'gid-3', facts: { status: 'sourced', provider: 'google', checkedAt: new Date().toISOString(), summary: 'Test', open, price: 12, priceHigh: 25, dietary: [], sources: [] } }; };
+  try {
+    const venue = Object.values(store.data.places).find(p => /restaurant/i.test(p.category)).id;
+    const facts = await engine.facts(venue, nextSaturday(), '19:00'); assert.equal(facts.provider, 'google'); assert.equal(facts.date, nextSaturday());
+    assert.deepEqual(store.data.facts, {}, 'Places content is not written to the persisted cache'); assert.equal(store.data.googleIds[venue], 'gid-3');
+    await engine.facts(venue, nextSaturday(), '19:00'); assert.equal(calls, 1, 'reused within 15 minutes');
+    open = false; const closed = await engine.facts(venue, nextSaturday(), '23:00');
+    assert.ok(evaluatePrivate(engine.context('ricky'), { place: store.data.places[venue], date: nextSaturday(), time: '19:00', allowance: 20 }, closed).codes.includes('closed'));
+  } finally { if (saved === undefined) delete process.env.GOOGLE_PLACES_KEY; else process.env.GOOGLE_PLACES_KEY = saved; store.close(); }
+});
+
+test('unvouched cuisine suggestions are nearest to the person\'s shared location when there is one', () => {
+  const { store, engine } = setup(); const origin = { lat: 40.0995, lon: -83.1141 }; // Dublin, OH: far from OSU
+  const fromOsu = engine.unvouched('ricky', 'indian'), fromHere = engine.unvouched('ricky', 'indian', origin);
+  assert.ok(fromOsu.every(p => p.distanceSource === 'OSU')); assert.ok(fromHere.every(p => p.distanceSource === 'your location'));
+  assert.ok(fromHere.every((p, i) => i === 0 || fromHere[i - 1].distance <= p.distance), 'sorted nearest first');
+  assert.notDeepEqual(fromHere.map(p => p.id), fromOsu.map(p => p.id), 'a different location gives different nearest spots'); store.close();
+});

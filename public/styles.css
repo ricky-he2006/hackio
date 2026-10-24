@@ -39,7 +39,7 @@ img{display:block}
 .tagline{font-size:12px;line-height:16px;font-weight:600;color:var(--muted)}
 .header-actions{display:flex;gap:8px}
 .icon-circle{width:44px;height:44px;border-radius:999px;border:2px solid var(--ink);background:var(--paper);display:flex;align-items:center;justify-content:center;color:var(--ink);flex-shrink:0;text-decoration:none}
-.icon-circle.me{background:var(--purple);font-weight:700;font-size:15px}
+.icon-circle.me{background:var(--bg,var(--purple));font-weight:700;font-size:15px;overflow:hidden;padding:0}
 .titlebar{flex-shrink:0;padding:8px 20px 14px 16px;border-bottom:2px solid var(--ink);display:flex;flex-direction:column;gap:2px;background:var(--white)}
 .titlebar.plain{border-bottom:0;padding:12px 16px 0;gap:4px}
 .titlebar.top{padding-top:20px}
@@ -142,7 +142,10 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 .sticker.gray{background:var(--gray);border-color:var(--muted-2);color:var(--muted-2)}
 
 /* Avatars */
-.av{width:var(--s,34px);height:var(--s,34px);flex-shrink:0;border-radius:999px;border:2px solid var(--ink);background:var(--bg,var(--lav-3));display:flex;align-items:center;justify-content:center;font-size:var(--f,13px);font-weight:700;color:var(--ink);line-height:1}
+.av{width:var(--s,34px);height:var(--s,34px);flex-shrink:0;border-radius:999px;border:2px solid var(--ink);background:var(--bg,var(--lav-3));display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--ink);line-height:1}
+/* Uploaded photo, or the placeholder silhouette (see avatarFace in app.js), filling any avatar circle. */
+.av-img{width:100%;height:100%;object-fit:cover;display:block}
+.av-sil{width:100%;height:100%;display:block;fill:var(--ink);opacity:.45}
 .av.dashed{border-style:dashed;border-color:var(--muted);background:var(--paper);color:var(--muted-2)}
 .av-stack{display:flex;flex-shrink:0}
 .av-stack .av+.av{margin-left:var(--o,-8px)}
@@ -170,11 +173,16 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 .map-snip .pin{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--coral);border:2px solid var(--ink);box-shadow:0 0 0 3px rgba(255,255,255,.85)}
 .map-snip .osm-attr{position:absolute;right:4px;bottom:3px;font:600 9px/1.3 var(--body);color:var(--muted-2);background:rgba(255,253,247,.85);padding:0 4px;border-radius:4px}
 .photo.thumb .osm-attr,.photo.cover .osm-attr,.photo.t72 .osm-attr,.photo.thumb .photo-attr,.photo.cover .photo-attr,.photo.t72 .photo-attr{display:none}
+/* Neutral tile while a Google photo is on its way (photoPending in app.js); a slow shimmer says "loading" without a map. */
+.photo .photo-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(100deg,var(--lav-2) 40%,var(--lav-1) 50%,var(--lav-2) 60%) 0 0/250% 100%;animation:photo-shimmer 1.4s linear infinite;opacity:1;color:rgba(29,26,47,.28)}
+@keyframes photo-shimmer{to{background-position:-250% 0}}
+@media (prefers-reduced-motion:reduce){.photo .photo-loading{animation:none}}
 .photo .place-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .photo-attr{position:absolute;left:4px;bottom:3px;font:600 9px/1.3 var(--body);color:var(--muted-2);background:rgba(255,253,247,.85);padding:0 4px;border-radius:4px;opacity:1}
 .place-map{display:block;width:100%;height:200px;border:2px solid var(--ink);border-radius:14px;background:var(--lav-2)}
 .hero{position:relative;height:196px;flex-shrink:0;background:var(--lav-2);border-bottom:2px solid var(--ink);display:flex;align-items:center;justify-content:center}
 .hero{overflow:hidden}
+.hero .hero-note{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);margin:0;padding:2px 10px;border-radius:999px;background:rgba(255,253,247,.9);border:2px solid var(--ink);font-size:12px;font-weight:700;white-space:nowrap}
 .hero .hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .hero span{font-family:var(--display);font-weight:800;font-size:56px;opacity:.22}
 .hero .icon-circle{position:absolute;top:16px;left:16px}
@@ -247,7 +255,7 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 
 /* Profile */
 .profile-head{flex-shrink:0;padding:24px 20px 16px 16px;border-bottom:2px solid var(--ink);background:var(--purple);display:flex;flex-direction:column;gap:14px;color:var(--ink);position:relative}
-.profile-head .big-av{width:68px;height:68px;flex-shrink:0;border-radius:999px;border:2px solid var(--ink);background:var(--paper);box-shadow:3px 3px 0 var(--ink);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:26px;font-weight:800}
+.profile-head .big-av{width:68px;height:68px;flex-shrink:0;border-radius:999px;border:2px solid var(--ink);background:var(--bg,var(--paper));overflow:hidden;box-shadow:3px 3px 0 var(--ink);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:26px;font-weight:800}
 .profile-head h1{font-family:var(--display);font-weight:800;font-size:28px;line-height:32px}
 .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;text-align:center}
 .stats>*{background:var(--paper);border:2px solid var(--ink);border-radius:12px;padding:8px 0;color:var(--ink);text-decoration:none;display:flex;flex-direction:column}
@@ -273,8 +281,9 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 .toggle-row label{cursor:pointer}
 .toggle-row input:checked+span{background:var(--ink);color:var(--paper)}
 .toggle-row input:focus-visible+span{outline:3px solid var(--ink);outline-offset:2px}
-.toggle-row span{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 4px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font-size:14px;font-weight:700}
-.toggle-row span.plain{padding:0 12px;height:34px;font-size:13px}
+/* Only the pill itself: a bare `span` selector also matched the avatar inside it and squashed it into an oval. */
+.toggle-row label>span{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 4px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font-size:14px;font-weight:700}
+.toggle-row label>span.plain{padding:0 12px;height:34px;font-size:13px}
 
 /* Rating slider (custom track; the real range input sits on top, transparent) */
 .slider{position:relative;height:32px;margin:0 14px}
