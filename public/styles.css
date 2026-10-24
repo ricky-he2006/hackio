@@ -251,6 +251,9 @@ a.card.row,button.card.row{display:flex}a.card.col,button.card.col{display:flex}
 .seg{flex-shrink:0;padding:3px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);display:flex;color:var(--ink)}
 .seg button{flex:1;text-align:center;height:38px;border-radius:999px;font-size:15px;font-weight:600}
 .seg button[aria-selected="true"]{background:var(--ink);color:var(--paper);font-weight:700}
+.profile-sort-toggle{flex-shrink:0}
+.profile-sort-toggle button{padding:0 9px;font-size:13px;white-space:nowrap}
+.profile-sort-toggle button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
 .dropdown{position:relative}
 .listbox{position:absolute;right:0;top:52px;padding:6px;width:184px;background:var(--paper);border:2px solid var(--ink);border-radius:14px;box-shadow:4px 4px 0 var(--ink);display:flex;flex-direction:column;gap:4px;z-index:5}
 .listbox button{width:100%;height:40px;padding:0 12px;border:2px solid transparent;border-radius:10px;text-align:left;font-size:15px;font-weight:700}

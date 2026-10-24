@@ -9,7 +9,7 @@ const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
 let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', chatLens = {}, searchTimer;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
-const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', psort: 'recent', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
 
 /* ---------- Icons (drawn from the mockup boards) ---------- */
 const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
@@ -114,6 +114,7 @@ function ago(value) {
   if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`; if (s < 86400) return `${Math.round(s / 3600)}h`; if (s < 172800) return 'Yesterday'; if (s < 604800) return `${Math.round(s / 86400)}d`;
   return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+const reviewDate = value => { const t = Date.parse(String(value)); return Number.isFinite(t) ? new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''; };
 function dparts(date) {
   const d = new Date(`${date}T12:00:00`), f = o => d.toLocaleDateString('en-US', o);
   return { w: f({ weekday: 'short' }).toUpperCase(), d: d.getDate(), m: f({ month: 'short' }).toUpperCase(), long: f({ weekday: 'long' }), short: f({ weekday: 'short', month: 'short', day: 'numeric' }), md: f({ month: 'short', day: 'numeric' }) };
@@ -623,18 +624,21 @@ function profileScreen() {
   */
   const been = S.myReviews.map(review => ({ p: review.place, rating: review.rating, review })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
   const extra = [...new Set([...been, ...want].map(x => group(x.p)))].filter(g => !CATS.includes(g));
-  const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => {
+    if (ui.ptab === 'been' && ui.psort === 'rating') return (b.rating ?? 0) - (a.rating ?? 0) || String(b.review?.date || '').localeCompare(String(a.review?.date || ''));
+    return String(b.review?.date || '').localeCompare(String(a.review?.date || '')) || (b.rating ?? 0) - (a.rating ?? 0);
+  });
   const interests = String(S.me.private.interests || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
   return `<section class="profile-head"><button class="icon-circle gear" data-action="settings" aria-label="Settings and privacy">${I.gear}</button>
     <div class="row gap-14"><div class="big-av" aria-hidden="true" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</div><div class="grow"><h1>${esc(S.me.name)}</h1><p class="body-14 semi" style="margin-top:2px">${esc([S.me.area, cap(interests)].filter(Boolean).join(' · '))}</p>
       <div class="row gap-8" style="margin-top:8px"><label class="pill sm-text" for="avatar-input">${S.me.avatar ? 'Change photo' : 'Add photo'}</label><input id="avatar-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>${S.me.avatar ? '<button class="pill sm-text" data-action="avatar-remove">Remove</button>' : ''}</div></div></div>
     <dl class="stats"><div><dd><strong>${been.length}</strong></dd><dt><span>Been</span></dt></div><div><dd><strong>${want.length}</strong></dd><dt><span>Want to try</span></dt></div><a href="#" data-action="friends"><strong>${S.friends.length}</strong><span>Friends</span></a><div><dd><strong>${S.plans.length}</strong></dd><dt><span>Adventures</span></dt></div></dl></section>
   <div class="seg" role="tablist" aria-label="Your places" style="margin:14px 20px 0 16px"><button role="tab" aria-selected="${ui.ptab === 'been'}" data-action="ptab" data-value="been">Been</button><button role="tab" aria-selected="${ui.ptab === 'want'}" data-action="ptab" data-value="want">Want to try</button></div>
-  <div class="row between gap-12" style="position:relative;z-index:2;flex-shrink:0;padding:14px 20px 0 16px"><span id="cat-label" class="eyebrow">${ui.ptab === 'been' ? 'Your ratings for' : 'Saved in'}</span>
-    <div class="dropdown"><button class="pill primary h42 shadow" aria-haspopup="listbox" aria-expanded="${ui.catOpen}" aria-labelledby="cat-label" data-action="cat-toggle">${esc(ui.pcat)}${I.caret}</button>
-    ${ui.catOpen ? `<div class="listbox" role="listbox" aria-labelledby="cat-label">${cats.map(c => `<button role="option" aria-selected="${c === ui.pcat}" data-action="cat" data-value="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}</div></div>
-  <main class="content" data-scroll style="padding-top:14px"><ul class="stack gap-10" aria-label="${ui.ptab === 'been' ? 'Your ratings, highest first' : 'Your want to try list'}">
-    ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
+  <div class="row between gap-12" style="position:relative;z-index:2;flex-shrink:0;padding:14px 20px 0 16px">${ui.ptab === 'been' ? `<div class="seg profile-sort-toggle" role="group" aria-label="Sort your ratings"><button type="button" aria-label="Most recent" aria-pressed="${ui.psort === 'recent'}" data-action="profile-sort" data-profile-sort="recent">Recent</button><button type="button" aria-label="Highest rated" aria-pressed="${ui.psort === 'rating'}" data-action="profile-sort" data-profile-sort="rating">Rating</button></div>` : '<span id="cat-label" class="eyebrow">Saved in</span>'}
+    <div class="dropdown"><button class="pill primary h42 shadow" aria-haspopup="listbox" aria-expanded="${ui.catOpen}" aria-label="Choose category" data-action="cat-toggle">${esc(ui.pcat)}${I.caret}</button>
+    ${ui.catOpen ? `<div class="listbox" role="listbox" aria-label="Choose category">${cats.map(c => `<button role="option" aria-selected="${c === ui.pcat}" data-action="cat" data-value="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}</div></div>
+  <main class="content" data-scroll style="padding-top:14px"><ul class="stack gap-10" aria-label="${ui.ptab === 'been' ? (ui.psort === 'rating' ? 'Your ratings, highest first' : 'Your ratings, most recent first') : 'Your want to try list'}">
+    ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p), x.review?.date ? `Reviewed ${reviewDate(x.review.date)}` : ''])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
       || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul>
     <p class="meta-12 center" style="margin-top:24px">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Photos and maps © Google</p></main>${tabbar('you')}`;
   }
@@ -1026,6 +1030,7 @@ document.addEventListener('click', async event => {
       case 'additem': go('additem'); break;
       case 'filter': ui.filter = el.dataset.value; render(); break;
       case 'ptab': ui.ptab = el.dataset.value; render(); break;
+      case 'profile-sort': ui.psort = el.dataset.profileSort; render(); break;
       case 'cat-toggle': ui.catOpen = !ui.catOpen; render(); break;
       case 'cat': ui.pcat = el.dataset.value; ui.catOpen = false; render(); break;
       case 'comments': ui.comments.has(id) ? ui.comments.delete(id) : ui.comments.add(id); render(); break;

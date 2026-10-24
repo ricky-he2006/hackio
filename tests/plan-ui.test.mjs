@@ -38,3 +38,15 @@ test('creator cancellation lives in the details bottom bar, not the venue-detail
   assert.match(footer, /cancelButton/);
   assert.doesNotMatch(content, /data-action="cancel"/);
 });
+
+test('profile ratings expose recent and highest-rated sorting', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const profile = source.slice(source.indexOf('function profileScreen'), source.indexOf('function settingsScreen'));
+
+  assert.match(source, /psort: 'recent'/);
+  assert.match(profile, /data-profile-sort/);
+  assert.match(profile, /Most recent/);
+  assert.match(profile, /Highest rated/);
+  assert.match(profile, /ui\.psort === 'rating'/);
+  assert.match(profile, /Reviewed \$\{reviewDate\(x\.review\.date\)\}/);
+});
