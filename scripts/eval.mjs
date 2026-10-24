@@ -26,14 +26,15 @@ const intentCases = [
 
 // Planner cases: the venue fits every hard rule (except the last case), so only soft preferences should matter.
 // Counter cases name the exact codes expected; a spurious extra code (e.g. a false "budget") is a failure.
+// "prefer" cases expect an accept marked prefers: a preference tries another venue but never blocks the plan.
 const venue = (name, category, tags) => ({ id: 'EVAL', name, category, area: 'Short North', tags });
 const base = { budget: 40, start: '17:00', end: '23:30', days: ['Saturday', 'Sunday'], dietary: '', interests: '', energy: 'medium', preferences: '' };
 const plannerCases = [
   { name: 'fits, no preferences', context: base, place: venue('Northstar Cafe', 'restaurant', ['american', 'brunch']), expect: 'accept' },
-  { name: 'hates loud bars vs loud bar', context: { ...base, preferences: 'I really dislike loud bars, I want somewhere quiet' }, place: venue('Bar Louie', 'bar', ['bar', 'live music', 'loud']), expect: 'counter', codes: ['preference'] },
+  { name: 'hates loud bars vs loud bar', context: { ...base, preferences: 'I really dislike loud bars, I want somewhere quiet' }, place: venue('Bar Louie', 'bar', ['bar', 'live music', 'loud']), expect: 'prefer' },
   { name: 'loves ramen vs ramen', context: { ...base, preferences: 'ramen is my favourite', interests: 'ramen, matcha' }, place: venue('Menya Kizuki', 'restaurant', ['ramen', 'japanese']), expect: 'accept' },
-  { name: 'low energy vs nightclub', context: { ...base, energy: 'low', preferences: 'chill nights only, nothing rowdy' }, place: venue('Club Zero', 'nightclub', ['dance', 'dj', 'late night']), expect: 'counter', codes: ['preference'] },
-  { name: 'vegetarian preferred vs steakhouse', context: { ...base, dietary: 'vegetarian options preferred' }, place: venue('Hyde Park Prime Steakhouse', 'restaurant', ['steak', 'steakhouse']), expect: 'counter', codes: ['preference'] },
+  { name: 'low energy vs nightclub', context: { ...base, energy: 'low', preferences: 'chill nights only, nothing rowdy' }, place: venue('Club Zero', 'nightclub', ['dance', 'dj', 'late night']), expect: 'prefer' },
+  { name: 'vegetarian preferred vs steakhouse', context: { ...base, dietary: 'vegetarian options preferred' }, place: venue('Hyde Park Prime Steakhouse', 'restaurant', ['steak', 'steakhouse']), expect: 'prefer' },
   { name: 'budget overrun is a rule, not a model call', context: { ...base, budget: 15 }, place: venue('Northstar Cafe', 'restaurant', ['american']), expect: 'counter', codes: ['budget'], allowance: 24 }
 ];
 
@@ -64,14 +65,14 @@ const status = providerStatus();
 if (status.provider === 'local') { console.error('No model configured (AGENT_PROVIDER is local). Run with --env-file=.env.'); process.exit(1); }
 console.log(`Eval against ${status.provider} (chat: ${status.models.chat}, planner: ${status.models.planner}), ${SPACING_MS}ms between calls\n`);
 const rows = [];
-const suites = [['intent', intentCases, runIntent, (c, r) => c.check(r)], ['planner', plannerCases, runPlanner, (c, r) => r.verdict.type === c.expect && (!c.codes || [...r.verdict.codes].sort().join() === [...c.codes].sort().join())]];
+const suites = [['intent', intentCases, runIntent, (c, r) => c.check(r)], ['planner', plannerCases, runPlanner, (c, r) => c.expect === 'prefer' ? r.verdict.type === 'accept' && r.verdict.prefers === true : r.verdict.type === c.expect && !r.verdict.prefers && (!c.codes || [...r.verdict.codes].sort().join() === [...c.codes].sort().join())]];
 for (const [suite, cases, run, pass] of suites) {
   if (only && only !== suite) continue;
   for (const c of cases) {
     const started = Date.now();
     let r, ok, error = null;
     try { r = await run(c); ok = pass(c, r); } catch (e) { ok = false; error = e.message; }
-    const detail = error ? `ERROR ${error.slice(0, 80)}` : suite === 'intent' ? `intent=${r.intent?.intent ?? '-'} reply=${JSON.stringify((r.last.text || '').slice(0, 60))}` : `verdict=${r.verdict.type}[${r.verdict.codes}] model=${r.raw ? JSON.stringify(r.raw) : 'not called'}`;
+    const detail = error ? `ERROR ${error.slice(0, 80)}` : suite === 'intent' ? `intent=${r.intent?.intent ?? '-'} reply=${JSON.stringify((r.last.text || '').slice(0, 60))}` : `verdict=${r.verdict.type}[${r.verdict.codes}]${r.verdict.prefers ? " prefers" : ""} model=${r.raw ? JSON.stringify(r.raw) : 'not called'}`;
     rows.push({ suite, ok, ms: Date.now() - started });
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${suite.padEnd(7)} ${c.name.padEnd(42)} ${String(Date.now() - started).padStart(5)}ms  ${detail}`);
     await wait(SPACING_MS);

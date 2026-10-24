@@ -414,3 +414,13 @@ test('a model-proposed plan without friends or a word about going together stays
     await engine.chat('ricky', { text: 'something fun saturday with the crew' }); assert.equal(engine.user('ricky').chat.at(-1).kind, 'planDraft');
   } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
+
+test('recommendation constraints come from the user\'s words, not ones a model adds from their private context', async () => {
+  const prior = { provider: process.env.AGENT_PROVIDER, key: process.env.GEMINI_API_KEY }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only-placeholder';
+  const { store, engine } = setup(); engine.model = async () => ({ intent: 'recommend', query: 'matcha open saturdays first date vegetarian-friendly quiet' });
+  try {
+    await engine.chat('ricky', { text: 'matcha near me, open saturdays, good for a first date' });
+    const last = engine.user('ricky').chat.at(-1); assert.equal(last.kind, 'recommendations'); assert.doesNotMatch(last.query, /quiet|vegetarian/);
+    assert.ok(engine.recommend('ricky', last.query).every(p => !p.unmatched.some(u => /^Quiet/.test(u))));
+  } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
+});
