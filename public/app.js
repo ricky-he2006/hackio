@@ -303,7 +303,7 @@ function recCard(rec, big) {
     <div><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${metaLine}</p></div>
     ${q ? `<blockquote class="quote q-26">“${esc(q.quote)}”</blockquote>` : ''}
     <div class="row gap-8">${avStack(rec.reviews.map(r => r.author), 30)}<span class="body-14 semi">${who}</span></div>${unmatched}</article>`;
-  return `<article class="card pad sh-4 col gap-4"><div class="row between base gap-8"><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="flex-shrink:0">${metaLine}</p></div>
+  return `<article class="card pad sh-4 col gap-4"><div class="row between base wrap gap-8"><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta">${metaLine}</p></div>
     ${q ? `<blockquote class="quote">“${esc(q.quote)}” <span class="by">${nameOf(q.author)}</span></blockquote>` : ''}${unmatched}</article>`;
 }
 function planAttachment(p) {
