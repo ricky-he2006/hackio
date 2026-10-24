@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, MAIN_IDS } from '../lib/data.mjs';
-import { Engine, nextSaturday, evaluatePrivate, timeString } from '../lib/engine.mjs';
+import { Engine, nextSaturday, evaluatePrivate, timeString, listedHours } from '../lib/engine.mjs';
 import { createApp } from '../server.mjs';
 
 const setup = () => { const store = new Store({ path: ':memory:' }); const engine = new Engine(store, { delay: 0, search: async () => ({ status: 'unavailable', summary: 'Not connected', sources: [] }) }); return { store, engine }; };
@@ -74,6 +74,32 @@ test('fresh opinions change friend recommendations and remain attributed to the 
   assert.equal(engine.d.reviews.filter(r => r.userId === 'daniel' && r.placeId === target.id).length, 1); store.close();
 });
 
+test('the headline ask returns only places listed open Saturday, each with a friend vouching for first dates', () => {
+  const { store, engine } = setup();
+  const picks = engine.recommend('ricky', 'matcha near me, open on Saturdays, good for first dates');
+  assert.ok(picks.length >= 2);
+  for (const pick of picks) {
+    assert.ok(!pick.unmatched.some(u => /^(Closed|Opening hours|Date|Matcha)/.test(u)), `${pick.place.name}: ${pick.unmatched}`);
+    assert.ok(pick.reviews.some(r => /date/i.test(r.quote)), pick.place.name);
+  }
+  // Vouched for dates and matcha, but listed as closed on weekends.
+  assert.ok(!picks.some(p => p.place.name.includes('Campus Grind')));
+  store.close();
+});
+
+test('listed OpenStreetMap hours are read per day, with later rules overriding earlier ones', () => {
+  assert.deepEqual(listedHours('Mo-Fr 07:45-17:00', 'Saturday'), []);
+  assert.deepEqual(listedHours('Mo-Sa 07:00-18:45; Su 08:00-18:00', 'Saturday'), [[420, 1125]]);
+  assert.deepEqual(listedHours('Mo-Fr 07:00-19:00; Sa-Su 07:30-18:00', 'Sunday'), [[450, 1080]]);
+  assert.deepEqual(listedHours('Mo-Th 11:00-01:30; Fr-Sa 11:00-02:30; Su 11:00-00:30', 'Saturday'), [[660, 1590]]);
+  assert.deepEqual(listedHours('Mo-Th 07:00-15:00,16:00-20:00; Sa-Su 09:00-15:00,16:00-20:00', 'Saturday'), [[540, 900], [960, 1200]]);
+  assert.deepEqual(listedHours('Mo-Sa 08:00-21:00; Su closed', 'Sunday'), []);
+  assert.deepEqual(listedHours('24/7', 'Saturday'), [[0, 1440]]);
+  assert.deepEqual(listedHours('10:30-23:00', 'Saturday'), [[630, 1380]]);
+  assert.equal(listedHours('Mo-Fr 11:30+; Sa,Su 17:00+; PH off', 'Saturday'), null);
+  assert.equal(listedHours('', 'Saturday'), null);
+});
+
 test('expired invitations cannot be accepted and constraint changes block stale approval', async () => {
   const { store, engine } = setup(); const p = await start(engine);
   engine.settings('arnav', { budget: 1 }); assert.throws(() => engine.approve('ricky', p.id, p.revision), /constraints changed/);
@@ -119,6 +145,28 @@ test('model-backed evaluators receive one private context and cannot leak prose 
     const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.ok(contexts.length >= 4);
     assert.ok(contexts.every(x => x.person && !x.users && !x.otherUsers && !('budget' in x.person) && !('start' in x.person)));
     assert.ok(!JSON.stringify(engine.state('ricky')).includes('PRIVATE_MODEL_PROSE_SENTINEL'));
+  } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
+});
+
+test('model counters cannot stall a plan that passes every exact check', async () => {
+  const prior = { provider: process.env.AGENT_PROVIDER, key: process.env.GEMINI_API_KEY }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only-placeholder';
+  const { store, engine } = setup();
+  // Small models object to everything; a preference may try another venue but never blocks a plan that passes every exact check.
+  let calls = 0; engine.model = async (_s, _input, label) => { if (label === 'evaluator') calls++; return { verdict: 'prefer_another' }; };
+  try {
+    const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.equal(p.option.time, '20:30'); assert.ok(p.option.allowance <= 18);
+    assert.ok(calls > 0); assert.ok(p.log.some(l => l.type === 'counter' && l.text.includes('Another option would suit the group better')));
+    for (const id of p.participants) assert.equal(evaluatePrivate(engine.context(id, p), p.option, p.facts).type, 'accept');
+  } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
+});
+
+test('a model preference moves the plan to another venue that still passes exact checks', async () => {
+  const prior = { provider: process.env.AGENT_PROVIDER, key: process.env.GEMINI_API_KEY }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only-placeholder';
+  const { store, engine } = setup(); let first = null;
+  engine.model = async (_system, input) => { first ??= input.venue.name; return { verdict: input.venue.name === first ? 'prefer_another' : 'fits' }; };
+  try {
+    const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.ok(first); assert.notEqual(p.option.place.name, first);
+    for (const id of p.participants) assert.equal(evaluatePrivate(engine.context(id, p), p.option, p.facts).type, 'accept');
   } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
 
@@ -349,4 +397,15 @@ test('a friend\'s well-rated review tagged with a diet confirms it: no counter, 
   engine.user('daniel').friends.push('aditya');
   p.facts = { status: 'sourced', dietary: ['halal'] }; engine.dietCaveat('daniel', p);
   assert.ok(!engine.user('daniel').chat.some(m => /web source said so/.test(m.text)), 'friend-vouched diets get no web-only caveat'); store.close();
+});
+
+test('a model-proposed plan without friends or a word about going together stays a recommendation', async () => {
+  const prior = { provider: process.env.AGENT_PROVIDER, key: process.env.GEMINI_API_KEY }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only-placeholder';
+  const { store, engine } = setup(); engine.model = async () => ({ intent: 'plan', query: 'matcha', friends: [] });
+  try {
+    for (const text of ['matcha near me, open saturdays, good for a first date', 'find restaurants my friends love']) {
+      await engine.chat('ricky', { text }); assert.equal(engine.user('ricky').chat.at(-1).kind, 'recommendations', text);
+    }
+    await engine.chat('ricky', { text: 'something fun saturday with the crew' }); assert.equal(engine.user('ricky').chat.at(-1).kind, 'planDraft');
+  } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
 });
