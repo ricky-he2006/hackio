@@ -8,7 +8,7 @@ const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
 let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', lastChatLen = -1, searchTimer;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
-const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set() };
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' } };
 
 /* ---------- Icons (drawn from the mockup boards) ---------- */
 const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
@@ -250,7 +250,6 @@ function screen(r) {
     case 'addfriends': return addFriendsScreen(r);
     case 'settings': return settingsScreen();
     case 'facts': return factsScreen(r);
-    case 'newplan': return newPlanScreen(r);
     case 'quickrate': return quickRateScreen();
     case 'welcome': return welcomeScreen();
   }
@@ -273,21 +272,22 @@ function chatScreen() {
   const ideas = [`matcha near me, open saturdays, good for a first date`, friends.length ? `plan something saturday night with ${friends.map(f => f.name.split(' ')[0].toLowerCase()).join(' and ')}. something fun, not too pricey` : '', 'what do you remember about me?'].filter(Boolean);
   let body = '<div style="margin-top:auto"></div>';
   if (!S.chat.length) body += `<p class="agent-text">Hey ${first(S.me)}. Ask for a spot your friends vouch for, or tell me who you want to plan with. Nothing goes out until you say go.</p><div class="suggestions">${ideas.map(t => `<button class="label-pill" data-action="prompt" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-  body += S.chat.map((m, i) => message(m, latest[m.planId] === i)).join('');
+  body += S.chat.map((m, i) => message(m, latest[m.planId] === i, i === S.chat.length - 1)).join('');
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
+  if (ui.crew.open) body += crewCard();
   body += S.matches.map(matchCard).join('');
   const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
   return `${brandbar(`<button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile">${esc(S.me.name.charAt(0))}</button>`)}
   <main class="content" id="chat-log" data-scroll aria-label="Conversation">${body}</main>
   <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="${working ? 'Add someone, change the time, anything' : 'Where to? Ask or plan anything'}" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>${tabbar('chat')}`;
 }
-function message(m, isLatestForPlan) {
+function message(m, isLatestForPlan, isLast = false) {
   if (m.role === 'user') return `<p class="bubble">${esc(m.text)}</p>`;
   let extra = '';
   if (m.kind === 'recommendations') { const picks = (m.picks || []).slice(0, 3); extra = picks.map((r, i) => recCard(r, i === 0)).join(''); }
   if (m.kind === 'planStart') { const p = findPlan(m.planId); extra = `<div class="row wrap gap-8">${(m.friends || []).map(u => `<span class="party-chip">${av(u, 28)}${first(u)}</span>`).join('')}</div><p class="agent-text">Rounding them up now. Nothing goes out until you say go.</p>${p && isLatestForPlan ? planAttachment(p) : ''}`; }
   if (m.kind === 'plan') { const p = findPlan(m.planId); if (p && isLatestForPlan) extra = planAttachment(p); }
-  if (m.kind === 'planDraft') extra = `<button class="btn primary h48" data-action="newplan" data-draft="${esc(m.id)}">Pick your crew</button>`;
+  if (m.kind === 'planDraft' && isLast && !ui.crew.open) extra = `<button class="btn primary h48" data-action="crew-pick" data-id="${esc(m.id)}">Pick your crew</button>`;
   if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) extra = `<div class="card pad col gap-8"><p class="eyebrow">Your call, always</p><div class="row gap-8"><button class="pill primary" data-action="memory-save">Save to memory</button><button class="pill" data-action="memory-skip">Just this time</button></div></div>`;
   if (m.kind === 'memories') extra = S.me.private.memories.map(mem => `<div class="card row-pad row gap-10"><p class="grow body-14">${esc(mem.text)}</p><button class="pill" data-action="forget" data-id="${esc(mem.id)}">Forget</button></div>`).join('');
   if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
@@ -317,6 +317,17 @@ function roundingCard(p) {
   const ready = p.state === 'awaiting_approval', stuck = p.state === 'needs_decision';
   return `<div class="card pad-14 sh-4 col gap-8"><div class="row between"><span class="eyebrow">${ready ? 'Your party is ready' : stuck ? 'Your call' : 'Rounding up your party'}</span><span class="meta">${done} of ${invitees.length}</span></div>${rows.join('')}
     ${stuck ? `<p class="body-14">${esc(p.issue || '')}</p>` : ''}<button class="link" style="align-self:flex-start;margin-top:2px" data-action="${ready ? 'approve-open' : 'working'}" data-id="${esc(p.id)}">${ready ? 'See the route' : 'See details'}</button></div>`;
+}
+/* Chat-inline crew picker: replaces the old “pick your crew” form. The host taps friends; agents never add or remove anyone. */
+function crewCard() {
+  if (!ui.crew.open) return '';
+  const friends = S.friends.filter(f => MAIN_IDS.includes(f.id) && f.id !== S.me.id);
+  const selected = [...ui.crew.friends];
+  const who = selected.map(id => (S.friends.find(f => f.id === id) || { name: id }).name);
+  return `<div class="agent-block"><p class="agent-text">Who’s coming? Tap your crew${ui.crew.placeName ? ` — starting at <span class="strong">${esc(ui.crew.placeName)}</span>` : ''}.</p>
+  <div class="card r16 sh-4 col gap-12" style="padding:14px"><div class="row wrap gap-8">${friends.map(f => `<button class="chip h34" aria-pressed="${ui.crew.friends.has(f.id)}" data-action="crew-toggle" data-id="${esc(f.id)}" style="display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 6px">${av(f, 22)} ${esc(first(f))}</button>`).join('')}</div>
+  <div class="row gap-8"><button class="btn primary h50" data-action="crew-start" ${selected.length ? '' : 'disabled'} title="${selected.length ? 'Start the plan' : 'Pick at least one friend'}">${selected.length ? `Round up ${esc(names(who))}` : 'Round them up'}</button><button class="btn h50 fit" data-action="crew-close">Not now</button></div>
+  <p class="meta">You pick the people — agents never add or remove anyone. Each friend’s budget and calendar stay with their own agent.</p></div></div>`;
 }
 function matchCard(m) {
   const members = [S.me, ...m.friends], p = m.place, count = members.length, plannable = m.friends.some(f => MAIN_IDS.includes(f.id) && !f.fictional);
@@ -367,7 +378,7 @@ function placeScreen(r) {
       <div class="stack gap-4" style="align-items:center">${score(p.friendScore, 's62', 'Friend score')}<span class="eyebrow" style="font-size:11px;line-height:14px;letter-spacing:.03em">${p.friendCount} friend${p.friendCount === 1 ? '' : 's'}</span></div></div>
     <div class="row gap-8">${p.myRating != null ? `<button class="btn lav sm-text" data-action="log" data-id="${esc(p.id)}" aria-pressed="true">${I.check}Been · ${p.myRating.toFixed(1)}</button>` : `<button class="btn sm-text" data-action="log" data-id="${esc(p.id)}" aria-pressed="false">Been</button>`}
       <button class="btn sm-text ${p.saved ? 'lav' : ''}" data-action="save" data-id="${esc(p.id)}" aria-pressed="${p.saved}">${p.saved ? I.check + 'Saved' : 'Want to try'}</button>
-      ${food ? `<button class="btn primary sm-text" data-action="newplan" data-place="${esc(p.id)}">Plan this</button>` : ''}</div>
+      ${food ? `<button class="btn primary sm-text" data-action="crew" data-place="${esc(p.id)}" data-place-name="${esc(p.name)}">Plan this</button>` : ''}</div>
     ${p.tagCounts.length ? `<section><h2 class="eyebrow">What friends say</h2><div class="row wrap gap-8" style="margin-top:8px">${p.tagCounts.map(t => `<span class="label-pill">${esc(cap(t.tag))} · ${t.count}</span>`).join('')}</div></section>` : ''}
     <section class="stack gap-10"><h2 class="eyebrow">Friends’ reviews</h2>${p.reviews.map(rv => `<article class="card pad row top gap-10" style="padding:10px 12px">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${nameOf(rv.author)}${rv.synthetic ? ' <span class="meta-12">· demo</span>' : ''}</span><span class="h-display" style="font-weight:800">${rv.rating.toFixed(1)}</span></p><p class="quote q-22">“${esc(rv.quote)}”</p></div></article>`).join('') || '<p class="meta">No one in your circle has rated this yet.</p>'}</section>
     <section class="stack gap-8"><h2 class="eyebrow">Details</h2><p class="meta">${esc(p.address || 'Address not provided')}${p.hours ? `<br>Listed hours: ${esc(p.hours)}` : ''}<br>${esc(p.provenance || '')}</p>
@@ -453,9 +464,9 @@ function adventuresScreen() {
   const today = todayISO(), rank = p => status(p).key === 'ok' ? 0 : 1;
   const upcoming = S.plans.filter(p => p.option.date >= today).sort((a, b) => rank(a) - rank(b) || a.option.date.localeCompare(b.option.date));
   const past = S.plans.filter(p => p.option.date < today).sort((a, b) => b.option.date.localeCompare(a.option.date));
-  return `${titlebar('Adventures', { back: false, cls: 'top', right: `<button class="pill primary h44 shadow" data-action="newplan">${I.plus}New</button>` })}
+  return `${titlebar('Adventures', { back: false, cls: 'top', right: `<button class="pill primary h44 shadow" data-action="crew">${I.plus}New</button>` })}
   <main class="content gap-18" data-scroll><h2 class="eyebrow tight">Upcoming</h2>
-    ${upcoming.map(advCard).join('') || `<div class="card empty-card"><p class="h-19">The group chat could never.</p><p class="meta">Pick your people. Your agents handle the back-and-forth.</p><button class="btn primary h48" style="width:100%" data-action="newplan">Start an adventure</button></div>`}
+    ${upcoming.map(advCard).join('') || `<div class="card empty-card"><p class="h-19">The group chat could never.</p><p class="meta">Pick your people. Your agents handle the back-and-forth.</p><button class="btn primary h48" style="width:100%" data-action="crew">Start an adventure</button></div>`}
     ${past.length ? `<h2 class="eyebrow" style="margin-bottom:-6px">Past</h2>${past.map(pastRow).join('')}` : ''}</main>${tabbar('adventures')}`;
 }
 function advCard(p) {
@@ -597,19 +608,6 @@ function changeScreen(p) {
     <button class="btn primary lg">Recheck with everyone</button></form></main>`;
 }
 
-/* Pick friends / new plan */
-function newPlanScreen(r) {
-  const draft = r.draft || {}, chosen = new Set(draft.friends || r.friends || []);
-  return `${titlebar('Who’s coming?', { size: 't30', sub: 'You pick the people. Agents never add or remove anyone.', subMuted: true })}<main class="content" data-scroll><form id="plan-form" class="form">
-    <fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Your party</legend><div class="toggle-row">${S.friends.filter(u => MAIN_IDS.includes(u.id)).map(u => `<label><input type="checkbox" name="friends" value="${esc(u.id)}" ${chosen.has(u.id) ? 'checked' : ''}><span>${av(u, 28)}${first(u)}</span></label>`).join('')}</div></fieldset>
-    <label class="lbl">What’s the occasion?<input class="input" name="title" value="${esc(draft.title || 'Saturday night')}" maxlength="80" required></label>
-    <div class="two"><label class="lbl">Day<input class="input" name="date" type="date" value="${esc(r.date || S.defaultDate)}" required></label><label class="lbl">Starting time<input class="input" name="time" type="time" value="${esc(r.time || '19:00')}" required></label></div>
-    <label class="lbl">Proposed spend per person ($)<input class="input" name="allowance" type="number" min="0" max="10000" value="24" required></label>
-    <label class="lbl">After dinner (optional)<select class="select" name="activityId"><option value="">Keep it to dinner</option>${(S.activities || []).map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label>
-    ${r.placeId ? `<p class="meta">Starting with the spot you picked.</p>` : ''}
-    ${lockNote('Each friend’s budget and calendar stay with their own agent.')}<button class="btn primary lg">Round them up</button></form></main>`;
-}
-
 /* 13 · Friends */
 function friendsScreen() {
   const q = String(drafts['friend-q'] || '').toLowerCase(), list = S.friends.filter(u => !q || u.name.toLowerCase().includes(q));
@@ -728,7 +726,14 @@ async function sendChat(text, planId) {
   try { await api('/chat', { text, planId }); delete drafts.message; await refresh(); } finally { pending = false; render(); }
 }
 async function createPlan(body) { const { planId } = await api('/plans', body); await refresh(); replaceOrGo('working', { id: planId }); }
-function replaceOrGo(name, params) { if (['newplan', 'change'].includes(cur().name)) replace(name, params); else go(name, params); }
+function replaceOrGo(name, params) { if (['change'].includes(cur().name)) replace(name, params); else go(name, params); }
+function openCrew({ friends = [], placeId = null, placeName = null, query = 'restaurants' } = {}) { ui.crew = { open: true, friends: new Set(friends), placeId, placeName, query }; tab('chat'); }
+async function startCrew() {
+  const friends = [...ui.crew.friends]; if (!friends.length) { toast('Pick at least one friend.'); return; }
+  const c = ui.crew; ui.crew.open = false;
+  try { await api('/plans', { friends, placeId: c.placeId || undefined, date: S.defaultDate, time: '19:00', allowance: 24, query: c.placeName || 'restaurants', title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew' }); await refresh(); }
+  catch (error) { toast(error.message); ui.crew.open = true; }
+}
 async function finishQuick() {
   const answers = ui.quick?.answers || []; ui.quick = null;
   await api('/onboard', { answers }); await refresh(); stack = [{ name: 'chat' }, { name: 'addfriends', onboarding: true }]; render();
@@ -777,8 +782,12 @@ document.addEventListener('click', async event => {
       case 'friends': go('friends'); break;
       case 'addfriends': go('addfriends'); break;
       case 'settings': go('settings'); break;
-      case 'newplan': { const draft = S.chat.find(m => m.id === el.dataset.draft)?.draft; go('newplan', { draft, placeId: el.dataset.place }); break; }
-      case 'plan-friend': go('newplan', { friends: [id] }); break;
+      case 'crew': openCrew({ placeId: el.dataset.place || null, placeName: el.dataset.placeName || null }); break;
+      case 'crew-pick': { const d = S.chat.find(m => m.id === id)?.draft || {}; openCrew({ friends: d.friends || [], placeId: d.placeId || null, placeName: d.place || null, query: d.query || 'restaurants' }); break; }
+      case 'crew-start': await startCrew(); break;
+      case 'crew-close': ui.crew.open = false; render(); break;
+      case 'crew-toggle': { const set = ui.crew.friends; set.has(id) ? set.delete(id) : set.add(id); render(); break; }
+      case 'plan-friend': openCrew({ friends: [id] }); break;
       case 'plan': openPlan(id); break;
       case 'working': case 'details': case 'invite': case 'changed': case 'change': case 'rate': go(action, { id }); break;
       case 'approve-open': go(findPlan(id)?.hasPendingChange ? 'changed' : 'approve', { id }); break;
@@ -832,10 +841,6 @@ document.addEventListener('submit', async event => {
     if (form.dataset.form === 'tell') {
       const text = String(drafts.tell || '').trim(); if (!text) { toast('Tell your agent what changed.'); return; }
       await api('/chat', { text, planId: form.dataset.id }); delete drafts.tell; await refresh(); replace('details', { id: form.dataset.id }); toast('Sent to your agent. The host only sees the new proposal.');
-    }
-    if (form.id === 'plan-form') {
-      const r = cur(), friends = data.getAll('friends'); if (!friends.length) { toast('Pick at least one friend.'); return; }
-      await createPlan({ title: data.get('title'), date: data.get('date'), time: data.get('time'), allowance: Number(data.get('allowance')), friends, placeId: r.placeId, activityId: data.get('activityId') || undefined, query: r.draft?.query || 'restaurants' });
     }
     if (form.id === 'tweak-form') { const id = form.dataset.id; await api('/plans/revise', { planId: id, option: { ...Object.fromEntries(data), allowance: Number(data.get('allowance')) } }); await refresh(); replace('working', { id }); }
     if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); await refresh(); back(); toast('Private settings saved.'); }
