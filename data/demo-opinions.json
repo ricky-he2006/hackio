@@ -1,0 +1,8 @@
+[
+  {"opinion_id":"CUR001","user_id":"U003","place_id":"osm:node/8512394394","sentiment":"positive","original_quote":"Took a first date here. Cozy corner seats and a really good iced matcha.","tag":"first date","date":"2026-10-18","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"},
+  {"opinion_id":"CUR002","user_id":"U004","place_id":"osm:node/8512394394","sentiment":"positive","original_quote":"Calm enough to actually talk. Great low-key date spot.","tag":"date spot","date":"2026-10-12","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"},
+  {"opinion_id":"CUR003","user_id":"U002","place_id":"osm:node/9509426810","sentiment":"positive","original_quote":"Their matcha latte is the best near campus, and it's a sweet first date spot.","tag":"first date","date":"2026-10-15","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"},
+  {"opinion_id":"CUR004","user_id":"U001","place_id":"osm:node/9509426810","sentiment":"positive","original_quote":"Quiet on weekend afternoons. Matcha is properly whisked.","tag":"quiet","date":"2026-10-11","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"},
+  {"opinion_id":"CUR005","user_id":"U004","place_id":"osm:node/9509426805","sentiment":"positive","original_quote":"Fun casual date: grab matcha boba and walk High Street.","tag":"date spot","date":"2026-10-09","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"},
+  {"opinion_id":"CUR006","user_id":"U003","place_id":"osm:node/5350010259","sentiment":"positive","original_quote":"Good matcha and a nice first date coffee between classes.","tag":"first date","date":"2026-10-07","provenance":"SYNTHETIC DEMO — NOT REAL REVIEW"}
+]

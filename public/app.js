@@ -3,12 +3,13 @@ import { qrSvg } from './qr.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const slot = new URLSearchParams(location.search).get('slot') || 'single';
+const inviteParam = new URLSearchParams(location.search).get('invite');
 const tokenKey = `disco-session-${slot}`;
 const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
 let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', lastChatLen = -1, searchTimer;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
-const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' } };
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
 
 /* ---------- Icons (drawn from the mockup boards) ---------- */
 const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
@@ -79,7 +80,7 @@ function typeTag(p) {
 }
 const tagPill = p => { const [label, bg] = typeTag(p); return `<span class="typetag" style="background:${bg}">${esc(label)}</span>`; };
 const price = p => p?.price == null ? '' : p.price < 15 ? '$' : p.price < 30 ? '$$' : '$$$';
-const distance = p => Number.isFinite(p?.distance) ? `${(p.distance * 0.621371).toFixed(1)} mi from OSU` : '';
+const distance = p => Number.isFinite(p?.distance) ? `${(p.distance * 0.621371).toFixed(1)} mi from ${p.distanceSource === 'your location' ? 'you' : 'OSU'}` : '';
 const GAPS = [[/^Date/, 'good for a date'], [/^Quiet/, 'quiet'], [/^Opening hours/, 'hours'], [/^Closed/, 'open then'], [/^Current menu prices/, 'prices'], [/^Above your/, 'under your price'], [/^Distance uses/, ''], [/^(\w+) not confirmed/, m => m[1].toLowerCase()]];
 const shortGap = text => { for (const [re, out] of GAPS) { const m = text.match(re); if (m) return typeof out === 'function' ? out(m) : out; } return text; };
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -157,7 +158,7 @@ async function api(path, data) {
 function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 4200); }
 async function refresh() {
   if (!token) return;
-  try { S = await api('/state'); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
+  try { const query = ui.location ? `?lat=${encodeURIComponent(ui.location.lat)}&lon=${encodeURIComponent(ui.location.lon)}` : ''; S = await api('/state' + query); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
 }
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 100); }
 async function live() {
@@ -175,7 +176,9 @@ async function live() {
 }
 function logoutLocal() { token = null; S = null; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
 async function login(username, password) {
-  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh(); live();
+  const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh();
+  if (inviteParam) { try { const preview = await api('/invite?from=' + encodeURIComponent(inviteParam)); stack.push({ name: 'invite-preview', id: inviteParam, data: preview }); } catch (error) { toast(error.message); } }
+  live();
   if (parent !== window) parent.postMessage({ kind: 'disco-ready', user: result.user.id }, location.origin);
 }
 
@@ -190,7 +193,8 @@ function openPlan(id) { const p = findPlan(id); if (p) go(planRoute(p), { id });
 async function load() {
   const r = cur();
   try {
-    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data); }
+    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data, r.rating); }
+    else if (r.name === 'friend-profile' && !r.data) r.data = await api('/profile?id=' + encodeURIComponent(r.id));
     else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
     else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
     else if (r.name === 'facts' && r.placeId && !r.data) r.data = await api('/facts', { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
@@ -203,9 +207,11 @@ async function load() {
 function tabbar(active) {
   return `<nav class="tabbar" aria-label="Main">${[['chat', 'Chat'], ['feed', 'Feed'], ['adventures', 'Adventures'], ['you', 'You']].map(([v, l]) => `<button class="tab ${active === v ? 'active' : ''}" data-action="tab" data-view="${v}" ${active === v ? 'aria-current="page"' : ''}>${l}${v === 'adventures' && needsMe() ? '<i class="dot" aria-hidden="true"></i><span class="sr-only"> (needs you)</span>' : ''}</button>`).join('')}</nav>`;
 }
+function notificationUnread() { return (S.notifications || []).filter(n => !ui.readNotifications.has(n.unreadKey)).length; }
+function notificationButton() { const n = notificationUnread(); return `<button class="icon-circle" data-action="notifications" aria-label="Notifications${n ? `, ${n} unread` : ''}">${n ? `<span class="notif-dot">${n > 9 ? '9+' : n}</span>` : '·'}</button>`; }
 const rootTab = () => stack[0].name;
 function brandbar(right) {
-  return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button>${right}</header>`;
+  return `<header class="brandbar"><button class="brand" data-action="tab" data-view="chat" aria-label="Disco, go to chat">${ball(44)}<span class="stack"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more</span></span></button><div class="header-actions">${notificationButton()}${right || ''}</div></header>`;
 }
 function titlebar(title, { back: showBack = stack.length > 1, close = false, sub = '', subMuted = false, right = '', cls = '', size = '' } = {}) {
   const nav = close ? `<button class="back" data-action="back" aria-label="Close">${I.close}</button>` : showBack ? `<button class="back" data-action="back" aria-label="Back">${I.back}</button>` : '';
@@ -217,7 +223,54 @@ const counterRow = text => `<p class="check counter">${I.arrow}${text}</p>`;
 const spinRow = text => `<p class="check muted">${I.spin}${text}</p>`;
 const lockNote = text => `<p class="lock-note">${I.lock}${text}</p>`;
 const sticker = (text, cls, tilt = 4, extra = '') => `<span class="sticker ${cls}" style="--tilt:${tilt}deg;${extra}">${esc(text)}</span>`;
-const photo = (p, style = '', cls = '', action = true) => action ? `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"><span>${initials(p.name)}</span></button>` : `<div class="photo ${cls}" style="${style}" aria-hidden="true"><span>${initials(p.name)}</span></div>`;
+// A map snippet centred on the venue: a 3×3 grid of OpenStreetMap tiles (zoom 16) offset so the venue sits at the
+// centre of any box up to 512px across. Places without coordinates keep the initials placeholder.
+// OSM's tile policy blocks browser requests with no Referer (it serves an "Access blocked" tile), and the page's
+// same-origin Referrer-Policy strips it, so each tile sends just the site origin.
+const OSM_ZOOM = 16;
+function mapSnip(p) {
+  if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon) || !p.lat) return '';
+  const size = 2 ** OSM_ZOOM * 256, rad = p.lat * Math.PI / 180;
+  const x = (p.lon + 180) / 360 * size, y = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * size, tx = Math.floor(x / 256), ty = Math.floor(y / 256);
+  let tiles = '';
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) tiles += `<img src="https://tile.openstreetmap.org/${OSM_ZOOM}/${tx + dx}/${ty + dy}.png" alt="" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" style="left:calc(50% + ${Math.round((tx + dx) * 256 - x)}px);top:calc(50% + ${Math.round((ty + dy) * 256 - y)}px)">`;
+  return `<span class="map-snip" aria-hidden="true">${tiles}<i class="pin"></i><small class="osm-attr">© OpenStreetMap</small></span>`;
+}
+// Google photo + street address per venue (only when the server has a Places key), fetched once per session; the
+// screen re-renders when it arrives and the map snippet shows until then. null = pending or nothing found.
+const media = new Map();
+function requestMedia(id) {
+  if (!S?.media || !id || media.has(id)) return;
+  media.set(id, null);
+  api('/place-media?id=' + encodeURIComponent(id)).then(m => { media.set(id, m); if (m.photo || m.address) render(); }).catch(() => {});
+}
+// Eager: one place on screen (place page header, address). Lists use lazy photos below instead.
+function placeMedia(p) { requestMedia(p?.id); return media.get(p?.id) ?? null; }
+// Lists fetch a photo only once its card scrolls near the viewport, so a long feed doesn't fetch (or bill) unseen photos.
+const photoObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { for (const e of entries) if (e.isIntersecting) { photoObserver.unobserve(e.target); requestMedia(e.target.dataset.photoFor); } }, { rootMargin: '300px' }) : null;
+function observePhotos() {
+  if (!photoObserver) { for (const el of document.querySelectorAll('[data-photo-for]')) requestMedia(el.dataset.photoFor); return; }
+  photoObserver.disconnect(); // the previous render's elements are gone
+  for (const el of document.querySelectorAll('[data-photo-for]')) photoObserver.observe(el);
+}
+// Google requires crediting the photographer wherever a Places photo appears outside a Google map.
+const photoHtml = m => m?.photo ? `<img class="place-photo" src="${safeUrl(m.photo)}" alt="" referrerpolicy="no-referrer">${m.attribution ? `<small class="photo-attr">Photo: ${esc(m.attribution)} · Google</small>` : ''}` : '';
+// Thumbnails are too small for an overlaid credit, so cards that use one print it as a line instead.
+const photoCredit = p => { const m = media.get(p.id); return m?.photo && m.attribution ? `<p class="meta-12">Photo: ${esc(m.attribution)} · Google</p>` : ''; };
+// The place page header: the Google photo when there is one, otherwise the name's initials (Details already has a map).
+const heroPhoto = p => photoHtml(placeMedia(p)).replace('class="place-photo"', 'class="hero-photo"') || `<span aria-hidden="true">${initials(p.name)}</span>`;
+const photoInner = (p, withPhoto) => (withPhoto && photoHtml(media.get(p.id))) || mapSnip(p) || `<span>${initials(p.name)}</span>`;
+// Large images show the photo by default. Small sizes hide the overlaid credit, so they only use a photo when the
+// caller opts in and prints photoCredit(p) on the card; otherwise they keep the map snippet.
+const SMALL = /\b(thumb|cover|t72)\b/;
+const photo = (p, style = '', cls = '', action = true, withPhoto = !SMALL.test(cls)) => {
+  const lazy = withPhoto && S?.media && !media.has(p.id) ? ` data-photo-for="${esc(p.id)}"` : '';
+  return action ? `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"${lazy}>${photoInner(p, withPhoto)}</button>` : `<div class="photo ${cls}" style="${style}" aria-hidden="true"${lazy}>${photoInner(p, withPhoto)}</div>`;
+};
+// Google's embed when a key is configured; otherwise a larger OpenStreetMap snippet. The iframe sends its origin as
+// referrer (the page's own policy is same-origin) so a referrer-restricted Embed API key works.
+const placeMap = p => p.mapEmbed ? `<iframe class="place-map" src="${esc(p.mapEmbed)}" title="Map of ${esc(p.name)}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
+  : mapSnip(p) ? `<div class="photo place-map">${mapSnip(p)}</div>` : '';
 function slider(id, value, label, bubble) {
   return `<div class="slider" style="--c:${scoreColor(value)}"><div class="track" aria-hidden="true"></div><div class="fill" aria-hidden="true" style="width:calc(${value * 10}% + 12px)"></div><div class="thumb" aria-hidden="true" style="left:${value * 10}%"></div><input id="${id}" type="range" min="0" max="10" step="0.5" value="${value}" aria-label="${esc(label)}" data-slider data-bubble="${bubble}"></div>`;
 }
@@ -247,6 +300,9 @@ function screen(r) {
     case 'catalog': return catalogScreen(r);
     case 'additem': return addItemScreen();
     case 'friends': return friendsScreen();
+    case 'friend-profile': return friendProfileScreen(r);
+    case 'notifications': return notificationsScreen();
+    case 'invite-preview': return invitePreviewScreen(r);
     case 'addfriends': return addFriendsScreen(r);
     case 'settings': return settingsScreen();
     case 'facts': return factsScreen(r);
@@ -272,6 +328,7 @@ function chatScreen() {
   const ideas = [`matcha near me, open saturdays, good for a first date`, friends.length ? `plan something saturday night with ${friends.map(f => f.name.split(' ')[0].toLowerCase()).join(' and ')}. something fun, not too pricey` : '', 'what do you remember about me?'].filter(Boolean);
   let body = '<div style="margin-top:auto"></div>';
   if (!S.chat.length) body += `<p class="agent-text">Hey ${first(S.me)}. Ask for a spot your friends vouch for, or tell me who you want to plan with. Nothing goes out until you say go.</p><div class="suggestions">${ideas.map(t => `<button class="label-pill" data-action="prompt" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+  if (ui.locationStatus !== 'live') body += `<p class="meta location-note">Near me uses the OSU demo location until you allow location. <button class="link" data-action="location">Use my location</button></p>`;
   body += S.chat.map((m, i) => message(m, latest[m.planId] === i, i === S.chat.length - 1)).join('');
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
   if (ui.crew.open) body += crewCard();
@@ -290,6 +347,7 @@ function message(m, isLatestForPlan, isLast = false) {
   if (m.kind === 'planDraft' && isLast && !ui.crew.open) extra = `<button class="btn primary h48" data-action="crew-pick" data-id="${esc(m.id)}">Pick your crew</button>`;
   if (m.kind === 'memoryPrompt' && S.me.pendingMemory?.id === m.pendingId) extra = `<div class="card pad col gap-8"><p class="eyebrow">Your call, always</p><div class="row gap-8"><button class="pill primary" data-action="memory-save">Save to memory</button><button class="pill" data-action="memory-skip">Just this time</button></div></div>`;
   if (m.kind === 'memories') extra = S.me.private.memories.map(mem => `<div class="card row-pad row gap-10"><p class="grow body-14">${esc(mem.text)}</p><button class="pill" data-action="forget" data-id="${esc(mem.id)}">Forget</button></div>`).join('');
+  if (m.kind === 'reviewDraft' && m.placeId) extra = `<button class="btn primary h48" data-action="log" data-id="${esc(m.placeId)}" data-rating="${esc(m.rating)}">Log it</button>`;
   if (m.kind === 'review' && m.placeId) extra = `<button class="label-pill" style="align-self:flex-start" data-action="place" data-id="${esc(m.placeId)}">See what friends say</button>`;
   return `<div class="agent-block"><p class="agent-text">${esc(m.text)}</p>${extra}</div>`;
 }
@@ -298,12 +356,15 @@ function recCard(rec, big) {
   const metaLine = meta([distance(p), hoursLabel(p), price(p)]) || meta([typeTag(p)[0], p.area]);
   const gaps = (rec.unmatched || []).map(shortGap).filter(Boolean);
   const unmatched = gaps.length ? `<p class="meta-12">Not confirmed yet: ${esc(gaps.join(', '))}</p>` : '';
-  if (big) return `<article class="card pad sh-4 col gap-8">${photo(p, 'height:104px')}${sticker(`Vouched ×${rec.votes}`, 'coral lg', 4, 'top:20px;right:20px;padding:4px 10px')}
+  if (!big) return `<article class="card pad sh-4 row top gap-12">${photo(p, '', 't72', true, true)}<div class="col gap-4 grow" style="min-width:0"><div><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${metaLine}</p></div><blockquote class="quote">${q ? `“${esc(q.quote)}” <span class="by">${nameOf(q.author)}</span>` : ''}</blockquote>${unmatched}${photoCredit(p)}</div></article>`;
+  if (big) return `<article class="card pad sh-4 col gap-8">${photo(p, 'height:104px', '', true, true)}${sticker(`Vouched ×${rec.votes}`, 'coral lg', 4, 'top:20px;right:20px;padding:4px 10px')}
     <div><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${metaLine}</p></div>
     ${q ? `<blockquote class="quote q-26">“${esc(q.quote)}”</blockquote>` : ''}
     <div class="row gap-8">${avStack(rec.reviews.map(r => r.author), 30)}<span class="body-14 semi">${who}</span></div>${unmatched}</article>`;
-  return `<article class="card pad sh-4 col gap-4"><div class="row between base gap-8"><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="flex-shrink:0">${metaLine}</p></div>
+  return `<article class="card pad sh-4 col gap-4"><div class="row between base wrap gap-8"><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta">${metaLine}</p></div>
     ${q ? `<blockquote class="quote">“${esc(q.quote)}” <span class="by">${nameOf(q.author)}</span></blockquote>` : ''}${unmatched}</article>`;
+  return `<article class="card pad sh-4 row top gap-12">${photo(p, '', 't72', true, true)}<div class="col gap-4 grow" style="min-width:0"><div><h2 class="h-19"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta" style="margin-top:2px">${metaLine}</p></div>
+    ${q ? `<blockquote class="quote">“${esc(q.quote)}” <span class="by">${nameOf(q.author)}</span></blockquote>` : ''}${unmatched}${photoCredit(p)}</div></article>`;
 }
 function planAttachment(p) {
   if (p.isHost && ['negotiating', 'awaiting_approval', 'needs_decision'].includes(p.state) && !p.hasPendingChange) return roundingCard(p);
@@ -334,7 +395,7 @@ function matchCard(m) {
   const when = m.window ? `, and ${count > 2 ? 'everyone’s' : 'you’re both'} free ${dparts(m.window.date).long} ${partOfDay(m.window.time)}` : '';
   return `<div class="agent-block"><p class="agent-text">Good timing: ${count > 2 ? `${WORDS[count] || count} of you want` : `you and ${first(m.friends[0])} both want`} to try the same spot${when}.</p>
   <article class="card r16 pad-14 sh-5 col gap-12" style="padding:14px">${sticker('It’s a match', 'yellow', 4, 'top:-12px;right:14px;padding:3px 10px')}
-    <div class="row gap-12">${photo(p, '', 't72')}<div class="grow"><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta row gap-6" style="margin-top:2px">${tagPill(p)}${meta([p.area, price(p)])}</p></div></div>
+    <div class="row gap-12">${photo(p, '', 't72', true, true)}<div class="grow"><h2 class="h-21"><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></h2><p class="meta row gap-6" style="margin-top:2px">${tagPill(p)}${meta([p.area, price(p)])}</p>${photoCredit(p)}</div></div>
     <div class="dashed-top stack gap-8"><p class="eyebrow">On everyone’s want to try</p><div class="row gap-10">${avStack(members, 34)}<p class="body-14 semi">${names(members.map(nameOf))}</p></div>
       ${m.window ? checkRow(esc(m.window.text)) : spinRow('No shared free time this weekend yet')}
       ${m.rating ? `<p class="check">${I.check}<span>${first(m.rating.author)} rated it ${m.rating.rating.toFixed(1)}: <span class="quote q-20">“${esc(m.rating.quote.length > 48 ? m.rating.quote.slice(0, 46) + '…' : m.rating.quote)}”</span></span></p>` : ''}</div>
@@ -353,9 +414,24 @@ function feedScreen() {
   <main class="content gap-16" data-scroll aria-label="Friends activity" style="padding-top:12px;padding-bottom:90px">${items.map(i => i.html).join('') || `<div class="card empty-card"><p class="h-19">Nothing here yet</p><p class="meta">When friends rate something in this category, it shows up here.</p></div>`}</main>
   <button class="fab" data-action="catalog" data-purpose="review" aria-label="Log a review">${I.plusBig}</button>${tabbar('feed')}`;
 }
+// Review cards are for photos the reviewer uploads. Uploads aren't stored yet, so they keep the plain placeholder
+// (no map, no Google photo) until that exists; swap this helper's body when they are.
+const reviewPhoto = (p, style = '', cls = '') => `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"><span>${initials(p.name)}</span></button>`;
+function notificationsScreen() {
+  const list = S.notifications || [];
+  return `${titlebar('Notifications', { size: 't30', right: list.length ? '<button class="pill" data-action="notifications-read">Mark all read</button>' : '' })}<main class="content gap-8" data-scroll>
+    ${list.map(n => `<button class="card row-pad row gap-10 ${ui.readNotifications.has(n.unreadKey) ? '' : 'sh-4'}" style="text-align:left" data-action="notification" data-id="${esc(n.id)}"><span class="grow stack"><span class="body-15 strong">${esc(n.title)}</span><span class="body-14">${esc(n.body)}</span><span class="meta-12">${esc(ago(n.at))}</span></span>${ui.readNotifications.has(n.unreadKey) ? '' : '<span class="dot" aria-label="Unread"></span>'}</button>`).join('') || '<div class="card empty-card"><p class="h-19">You’re all caught up</p><p class="meta">Invitations, friend activity, and plan updates will appear here.</p></div>'}
+  </main>`;
+}
+function invitePreviewScreen(r) {
+  const p = r.data;
+  if (!p?.inviter) return `${titlebar('Invite unavailable')}<main class="content" data-scroll><div class="card empty-card"><p class="h-19">That invite link is no longer available.</p><p class="meta">Ask your friend to send a fresh Disco link.</p></div></main>`;
+  const action = p.status === 'available' ? `<button class="btn primary lg" data-action="invite-add" data-id="${esc(p.inviter.id)}">Add ${first(p.inviter)} on Disco</button>` : `<p class="meta center">${p.status === 'friends' ? 'You’re already friends.' : p.status === 'pending' ? 'Friend request already pending.' : 'That is your own invite link.'}</p>`;
+  return `${titlebar('You’ve been invited', { close: true, cls: 'inline', size: 't24' })}<main class="content gap-16" data-scroll><section class="card purple pad col gap-12"><div class="row gap-12">${av(p.inviter, 60)}<div><h1 class="h-24">${esc(p.inviter.name)}</h1><p class="body-14">wants to connect with you on Disco</p></div></div>${p.inviter.fictional ? '<p class="meta">Demo account</p>' : ''}</section>${action}</main>`;
+}
 function feedCard(r) {
   const p = r.place, media = ['Music', 'Movies & TV', 'Books', 'Products'].includes(p.category), saved = S.me.saved.includes(p.id), liked = r.likes.includes(S.me.id), open = ui.comments.has(r.id);
-  const body = media ? `<div class="row gap-12">${photo(p, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${photo(p, 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
+  const body = media ? `<div class="row gap-12">${reviewPhoto(p, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${reviewPhoto(p, 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
   return `<article class="card pad sh-4 col gap-10"><div class="row gap-10">${av(r.author, 36)}<div class="grow"><p class="body-14"><span class="strong">${nameOf(r.author)}</span> rated <button class="strong" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></p><p class="meta-12">${meta([typeTag(p)[0], p.area, ago(r.date), r.synthetic ? 'demo' : ''])}</p></div>${score(r.rating)}</div>
     ${body}
     <div class="row gap-4"><button class="pill ghost h36" data-action="like" data-id="${esc(r.id)}" aria-pressed="${liked}" aria-label="Like, ${r.likes.length} likes">${I.heart(liked)}${r.likes.length}</button><button class="pill ghost h36" data-action="comments" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Comments, ${r.comments.length}">${I.comment}${r.comments.length}</button>
@@ -372,7 +448,7 @@ function placeScreen(r) {
   const p = r.data;
   if (!p) return `<div class="hero"><button class="icon-circle" data-action="back" aria-label="Back">${I.back}</button></div><main class="content" data-scroll><p class="meta">Loading…</p></main>`;
   const food = group(p) === 'Eat & Drink';
-  return `<div class="hero"><span aria-hidden="true">${initials(p.name)}</span><button class="icon-circle" data-action="back" aria-label="Back">${I.back}</button></div>
+  return `<div class="hero">${heroPhoto(p)}<button class="icon-circle" data-action="back" aria-label="Back">${I.back}</button></div>
   <main class="content gap-16" data-scroll>
     <div class="row top gap-12"><div class="grow"><h1 class="title t30">${esc(p.name)}</h1><p class="meta" style="margin-top:4px">${meta([typeTag(p)[0], p.area, price(p), hoursLabel(p)])}</p></div>
       <div class="stack gap-4" style="align-items:center">${score(p.friendScore, 's62', 'Friend score')}<span class="eyebrow" style="font-size:11px;line-height:14px;letter-spacing:.03em">${p.friendCount} friend${p.friendCount === 1 ? '' : 's'}</span></div></div>
@@ -381,18 +457,19 @@ function placeScreen(r) {
       ${food ? `<button class="btn primary sm-text" data-action="crew" data-place="${esc(p.id)}" data-place-name="${esc(p.name)}">Plan this</button>` : ''}</div>
     ${p.tagCounts.length ? `<section><h2 class="eyebrow">What friends say</h2><div class="row wrap gap-8" style="margin-top:8px">${p.tagCounts.map(t => `<span class="label-pill">${esc(cap(t.tag))} · ${t.count}</span>`).join('')}</div></section>` : ''}
     <section class="stack gap-10"><h2 class="eyebrow">Friends’ reviews</h2>${p.reviews.map(rv => `<article class="card pad row top gap-10" style="padding:10px 12px">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${nameOf(rv.author)}${rv.synthetic ? ' <span class="meta-12">· demo</span>' : ''}</span><span class="h-display" style="font-weight:800">${rv.rating.toFixed(1)}</span></p><p class="quote q-22">“${esc(rv.quote)}”</p></div></article>`).join('') || '<p class="meta">No one in your circle has rated this yet.</p>'}</section>
-    <section class="stack gap-8"><h2 class="eyebrow">Details</h2><p class="meta">${esc(p.address || 'Address not provided')}${p.hours ? `<br>Listed hours: ${esc(p.hours)}` : ''}<br>${esc(p.provenance || '')}</p>
-      <div class="row wrap gap-8"><button class="pill" data-action="facts" data-id="${esc(p.id)}">Check current details</button>${p.source ? `<a class="pill" href="${safeUrl(p.source)}" target="_blank" rel="noopener noreferrer">Source ↗</a>` : ''}</div></section>
+    <section class="stack gap-8"><h2 class="eyebrow">Details</h2>${placeMap(p)}<p class="meta">${esc(p.address || placeMedia(p)?.address || (p.area ? `${p.area} · street address not listed` : 'Address not provided'))}${p.hours ? `<br>Listed hours: ${esc(p.hours)}` : ''}${!p.address && placeMedia(p)?.address && !p.mapEmbed ? '<br><span class="meta-12">Address from Google Maps</span>' : ''}</p>
+      <div class="row wrap gap-8"><button class="pill" data-action="facts" data-id="${esc(p.id)}">Check current details</button>${p.mapsLink ? `<a class="pill" href="${safeUrl(p.mapsLink)}" target="_blank" rel="noopener noreferrer">Open in Google Maps ↗</a>` : ''}${p.source ? `<a class="pill" href="${safeUrl(p.source)}" target="_blank" rel="noopener noreferrer">Source ↗</a>` : ''}</div></section>
   </main>`;
 }
 const safeUrl = url => { try { const u = new URL(url); return ['http:', 'https:'].includes(u.protocol) ? esc(u.href) : '#'; } catch { return '#'; } };
 
 /* 9 · Log a review */
-const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud'];
-function initLog(p) {
+// Diet tags on a well-rated review let friends' agents treat that diet as confirmed (Engine.vouchedDiets).
+const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud', 'Vegetarian', 'Vegan', 'Halal', 'Gluten-free'];
+function initLog(p, suggested) {
   if (ui.logs[p.id]) return;
   const mine = S.myReviews.find(r => r.placeId === p.id);
-  ui.logs[p.id] = { rating: mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
+  ui.logs[p.id] = { rating: suggested ?? mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
   drafts.note = mine && !mine.tags.includes('quick-rate') ? mine.quote : '';
 }
 function logScreen(r) {
@@ -425,9 +502,14 @@ function addItemScreen() {
 }
 
 /* 10 · Profile */
-const CATS = ['Eat & Drink', 'Live Events', 'Music', 'Movies & TV', 'Products'];
+const CATS = ['Eat & Drink', 'Places', 'Live Events', 'Music', 'Movies & TV', 'Books', 'Products'];
 function profileScreen() {
-  const been = S.myReviews.map(r => ({ p: r.place, rating: r.rating })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
+  /* Legacy profile renderer kept here temporarily while the category view rolls out.
+  const profileBeen = S.myReviews.map(review => ({ p: review.place, rating: review.rating, review })).filter(x => x.p), profileWant = S.savedPlaces.map(p => ({ p }));
+  const profileList = (items, label) => `<section class="stack gap-8"><h2 class="eyebrow">${label}</h2>${items.filter(x => group(x.p) === ui.pcat).slice(0, 20).map(x => `<li class="card row-pad row gap-8"><button class="row gap-12 grow" style="text-align:left" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="body-15 strong">${esc(x.p.name)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button>${x.review ? `<button class="pill h36" data-action="edit-review" data-id="${esc(x.p.id)}">Edit</button><button class="pill h36" data-action="delete-review" data-id="${esc(x.review.id)}">Delete</button>` : ''}</li>`).join('') || '<p class="meta">Nothing here yet.</p>'}</section>`;
+  return `${titlebar('Your profile', { back: false, size: 't30', right: `<button class="icon-circle gear" data-action="settings" aria-label="Settings and privacy">${I.gear}</button>` })}<main class="content gap-16" data-scroll><section class="card purple pad col gap-10"><div class="row gap-14">${av(S.me, 56)}<div><h1 class="h-24">${esc(S.me.name)}</h1><p class="body-14">${esc([S.me.area, S.me.fictional ? 'demo person' : ''].filter(Boolean).join(' · '))}</p></div></div><p class="meta">${profileBeen.length} Been · ${profileWant.length} Want to try · ${S.friends.length} Friends · ${S.plans.length} Adventures</p></section><div class="seg" role="tablist" aria-label="Your places"><button role="tab" aria-selected="${ui.ptab === 'been'}" data-action="ptab" data-value="been">Been</button><button role="tab" aria-selected="${ui.ptab === 'want'}" data-action="ptab" data-value="want">Want to try</button></div>${ui.ptab === 'been' ? profileList(profileBeen, 'Your ratings') : profileList(profileWant, 'Saved in')}<p class="meta-12 center">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> · Photos and maps © Google</p></main>${tabbar('you')}`;
+  */
+  const been = S.myReviews.map(review => ({ p: review.place, rating: review.rating, review })).filter(x => x.p), want = S.savedPlaces.map(p => ({ p }));
   const extra = [...new Set([...been, ...want].map(x => group(x.p)))].filter(g => !CATS.includes(g));
   const cats = [...CATS, ...extra], items = (ui.ptab === 'been' ? been : want).filter(x => group(x.p) === ui.pcat).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const interests = String(S.me.private.interests || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
@@ -440,8 +522,13 @@ function profileScreen() {
     ${ui.catOpen ? `<div class="listbox" role="listbox" aria-labelledby="cat-label">${cats.map(c => `<button role="option" aria-selected="${c === ui.pcat}" data-action="cat" data-value="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}</div></div>
   <main class="content" data-scroll style="padding-top:14px"><ul class="stack gap-10" aria-label="${ui.ptab === 'been' ? 'Your ratings, highest first' : 'Your want to try list'}">
     ${items.map(x => `<li><button class="card row-pad row gap-12" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button></li>`).join('')
+      || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul>
+    <p class="meta-12 center" style="margin-top:24px">Venue data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Photos and maps © Google</p></main>${tabbar('you')}`;
+  }
+    /* ${items.map(x => `<li class="card row-pad row gap-8"><button class="row gap-12 grow" style="text-align:left" data-action="place" data-id="${esc(x.p.id)}"><span class="grow stack"><span class="row gap-8"><span class="body-15 strong" style="font-size:16px;line-height:22px">${esc(x.p.name)}</span>${tagPill(x.p)}</span><span class="meta-12">${meta([x.p.area, price(x.p)])}</span></span>${x.rating != null ? score(x.rating, 's44') : I.bookmark(true)}</button>${x.review ? `<button class="pill h36" data-action="edit-review" data-id="${esc(x.p.id)}" aria-label="Edit review for ${esc(x.p.name)}">Edit</button><button class="pill h36" data-action="delete-review" data-id="${esc(x.review.id)}" aria-label="Delete review for ${esc(x.p.name)}">Delete</button>` : ''}</li>`).join('')
       || `<li class="card empty-card"><p class="h-19">${ui.ptab === 'been' ? 'Nothing rated here yet' : 'Nothing saved here yet'}</p><p class="meta">${ui.ptab === 'been' ? 'Log something you tried and it lands here, sorted by your rating.' : 'Tap Want to try on a friend’s pick to save it.'}</p></li>`}</ul></main>${tabbar('you')}`;
 }
+*/
 function settingsScreen() {
   const p = S.me.private;
   return `${titlebar('Settings', { size: 't30' })}<main class="content gap-16" data-scroll>
@@ -615,8 +702,20 @@ function friendsScreen() {
   <main class="content" data-scroll>
     ${S.requests.length ? `<section class="card pad sh-4 col gap-10"><h2 class="eyebrow">Requests</h2>${sticker(`${S.requests.length} new`, 'coral')}${S.requests.map(r => `<div class="row gap-10">${av(r.fromUser, 38)}<span class="grow stack"><span class="body-15 strong">${esc(r.fromUser.name)}</span><span class="meta-12">${r.mutual.length ? `Friends with ${esc(names(r.mutual))}` : 'Wants to be friends'}</span></span><button class="pill primary h36" data-action="friend-accept" data-id="${esc(r.from)}">Accept</button><button class="icon-circle" style="width:36px;height:36px" data-action="friend-decline" data-id="${esc(r.from)}" aria-label="Decline ${esc(r.fromUser.name)}">${I.x}</button></div>`).join('')}</section>` : ''}
     <div class="search">${I.search('#5E5873')}<label class="sr-only" for="friend-q">Search your friends</label><input id="friend-q" placeholder="Search your friends" autocomplete="off" value="${esc(drafts['friend-q'] || '')}"></div>
-    <ul class="stack gap-8" aria-label="Your friends">${list.map(u => `<li class="card row-pad row gap-10">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.ratings} rating${u.ratings === 1 ? '' : 's'} · ${u.adventures} adventure${u.adventures === 1 ? '' : 's'} together${u.fictional ? ' · demo person' : ''}</span></span>${MAIN_IDS.includes(u.id) ? `<button class="pill" data-action="plan-friend" data-id="${esc(u.id)}">Plan</button>` : ''}</li>`).join('') || '<li class="meta">No friends match that.</li>'}</ul>
+    <ul class="stack gap-8" aria-label="Your friends">${list.map(u => `<li class="card row-pad row gap-10"><button class="row gap-10 grow" style="text-align:left" data-action="friend-profile" data-id="${esc(u.id)}">${av(u, 38)}<span class="grow stack"><span class="body-15 strong">${esc(u.name)}</span><span class="meta-12">${u.ratings} rating${u.ratings === 1 ? '' : 's'} · ${u.adventures} adventure${u.adventures === 1 ? '' : 's'} together${u.fictional ? ' · demo person' : ''}</span></span></button>${MAIN_IDS.includes(u.id) ? `<button class="pill" data-action="plan-friend" data-id="${esc(u.id)}">Plan</button>` : ''}</li>`).join('') || '<li class="meta">No friends match that.</li>'}</ul>
   </main>${tabbar(rootTab())}`;
+}
+
+function friendProfileScreen(r) {
+  const p = r.data;
+  if (!p) return `${titlebar('Friend profile')}<main class="content" data-scroll><p class="meta">Loading…</p></main>`;
+  const reviewRows = p.reviews.map(rv => `<article class="card pad row top gap-10">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${esc(rv.place?.name || 'Place')}</span>${score(rv.rating)}</p><p class="quote q-22">“${esc(rv.quote)}”</p><p class="meta-12">${rv.synthetic ? 'Demo opinion' : ago(rv.date)}</p></div></article>`).join('');
+  const list = (items, label) => `<section class="stack gap-8"><h2 class="eyebrow">${label}</h2>${items.slice(0, 12).map(place => `<button class="card row-pad row" style="text-align:left" data-action="place" data-id="${esc(place.id)}"><span class="grow"><span class="body-15 strong">${esc(place.name)}</span><span class="meta-12">${esc(place.area || '')}</span></span>${tagPill(place)}</button>`).join('') || '<p class="meta">Nothing here yet.</p>'}</section>`;
+  return `${titlebar(esc(p.user.name), { sub: [p.user.area, p.user.fictional ? 'demo person' : ''].filter(Boolean).join(' · ') })}<main class="content gap-16" data-scroll>
+    <section class="card purple pad col gap-10"><div class="row gap-12">${av(p.user, 56)}<div><h2 class="h-21">${esc(p.user.name)}</h2><p class="meta">${p.stats.been} Been · ${p.stats.wantToTry} Want to try · ${p.stats.friends} Friends</p></div></div><button class="btn primary h44" data-action="plan-friend" data-id="${esc(p.user.id)}">Plan something together</button></section>
+    ${list(p.been, 'Been')}${list(p.wantToTry, 'Want to try')}
+    <section class="stack gap-8"><h2 class="eyebrow">Reviews</h2>${reviewRows || '<p class="meta">No visible reviews yet.</p>'}</section>
+  </main>`;
 }
 
 /* 14 · Add friends */
@@ -659,7 +758,7 @@ function quickRateScreen() {
       <p class="row gap-8 meta" style="color:var(--ink);font-weight:600">${pick.reviewers.length ? `${avStack(pick.reviewers, 22, -6)}Popular with people you know` : 'Popular in Columbus'}</p></article></div>
     <div class="stack gap-10"><div class="row gap-8">${[['loved', 'Loved it'], ['fine', 'It was fine'], ['not', 'Not for me']].map(([v, l], i) => `<button class="btn lg ${i === 0 ? 'primary' : ''}" style="font-size:15px" data-action="quick" data-value="${v}">${l}</button>`).join('')}</div>
       <div class="row gap-8"><button class="btn dashed sm-text" data-action="quick" data-value="never">Never been</button><button class="btn dashed sm-text" data-action="quick" data-value="want">${I.bookmark(false)}Want to try</button></div></div>
-    <p class="meta center" style="margin-top:auto">Quick picks become rough ratings you can fine-tune later. <button class="link" style="font-size:13px" data-action="quick-skip">Skip to friends</button></p></main>`;
+    <p class="meta center" style="margin-top:auto">Quick picks become rough ratings you can fine-tune later. Friends see your ratings and Want to try list. <button class="link" style="font-size:13px" data-action="quick-skip">Skip to friends</button></p></main>`;
 }
 
 /* 18 · Rate the night */
@@ -718,21 +817,28 @@ function render() {
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); if (selection) try { el.setSelectionRange(...selection); } catch { /* Not a text field. */ } } }
   else if (key !== lastKey && lastKey) { const h = $('h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } }
   lastKey = key;
+  observePhotos();
 }
 
 /* ---------- Actions ---------- */
 async function sendChat(text, planId) {
+  if (!planId && /\bnear me\b/i.test(text)) await ensureLocation();
   pending = true; render();
   try { await api('/chat', { text, planId }); delete drafts.message; await refresh(); } finally { pending = false; render(); }
 }
+async function ensureLocation() {
+  if (ui.location || ui.locationStatus === 'denied') return;
+  if (!navigator.geolocation) { ui.locationStatus = 'denied'; return; }
+  await new Promise(resolve => navigator.geolocation.getCurrentPosition(position => { ui.location = { lat: position.coords.latitude, lon: position.coords.longitude }; ui.locationStatus = 'live'; resolve(); }, () => { ui.location = null; ui.locationStatus = 'denied'; resolve(); }, { enableHighAccuracy: false, maximumAge: 300000, timeout: 5000 }));
+}
 async function createPlan(body) { const { planId } = await api('/plans', body); await refresh(); replaceOrGo('working', { id: planId }); }
 function replaceOrGo(name, params) { if (['change'].includes(cur().name)) replace(name, params); else go(name, params); }
-function openCrew({ friends = [], placeId = null, placeName = null, query = 'restaurants' } = {}) { ui.crew = { open: true, friends: new Set(friends), placeId, placeName, query }; tab('chat'); }
+function openCrew({ friends = [], placeId = null, placeName = null, query = 'restaurants', draft = {} } = {}) { ui.crew = { open: true, friends: new Set(friends), placeId, placeName, query, draft }; tab('chat'); }
 async function startCrew() {
   const friends = [...ui.crew.friends]; if (!friends.length) { toast('Pick at least one friend.'); return; }
-  const c = ui.crew; ui.crew.open = false;
-  try { await api('/plans', { friends, placeId: c.placeId || undefined, date: S.defaultDate, time: '19:00', allowance: 24, query: c.placeName || 'restaurants', title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew' }); await refresh(); }
-  catch (error) { toast(error.message); ui.crew.open = true; }
+  const c = ui.crew; if (!c.open) return; ui.crew.open = false; render();
+  try { await api('/plans', { date: S.defaultDate, time: '19:00', allowance: 24, title: c.placeName ? `Dinner at ${c.placeName}` : 'Dinner with the crew', ...c.draft, friends, placeId: c.placeId || undefined, query: c.query }); await refresh(); }
+  catch (error) { toast(error.message); ui.crew.open = true; render(); }
 }
 async function finishQuick() {
   const answers = ui.quick?.answers || []; ui.quick = null;
@@ -761,7 +867,7 @@ document.addEventListener('click', async event => {
       case 'back': back(); break;
       case 'prompt': tab('chat'); await sendChat(el.dataset.text); break;
       case 'place': go('place', { id }); break;
-      case 'log': go('log', { id }); break;
+      case 'log': go('log', { id, rating: el.dataset.rating ? Number(el.dataset.rating) : undefined }); break;
       case 'catalog': if (el.dataset.replace) replace('catalog', { purpose: 'review', fromLog: true }); else go('catalog', { purpose: el.dataset.purpose || 'review' }); break;
       case 'catalog-pick': if (cur().purpose === 'review') replace('log', { id }); else go('place', { id }); break;
       case 'additem': go('additem'); break;
@@ -771,19 +877,27 @@ document.addEventListener('click', async event => {
       case 'cat': ui.pcat = el.dataset.value; ui.catOpen = false; render(); break;
       case 'comments': ui.comments.has(id) ? ui.comments.delete(id) : ui.comments.add(id); render(); break;
       case 'like': await api('/like', { reviewId: id }); await refresh(); break;
-      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
+      case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try. Your friends can see it.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
       case 'tag': { const set = ui.logs[id].tags; set.has(el.dataset.value) ? set.delete(el.dataset.value) : set.add(el.dataset.value); render(); break; }
       case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
       case 'post-review': {
         const st = ui.logs[id], quote = String(drafts.note || '').trim(); if (quote.length < 3) { toast('Add a short note for friends first.'); $('#note')?.focus(); break; }
-        el.disabled = true; await api('/reviews', { placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
+        el.disabled = true; await api('/reviews', { reviewId: cur().reviewId, placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
         delete drafts.note; delete ui.logs[id]; await refresh(); back(); toast('Posted. Your friends’ picks just updated.'); break;
       }
+      case 'edit-review': { const review = S.myReviews.find(r => r.placeId === id); if (review) go('log', { id, reviewId: review.id }); break; }
+      case 'delete-review': if (confirm('Delete this review?')) { await api('/reviews/delete', { reviewId: id }); await refresh(); toast('Review deleted.'); } break;
       case 'friends': go('friends'); break;
+      case 'friend-profile': go('friend-profile', { id }); break;
+      case 'notifications': go('notifications'); break;
+      case 'notifications-read': for (const n of S.notifications || []) ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); render(); break;
+      case 'notification': { const n = S.notifications.find(x => x.id === id); if (!n) break; ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); if (n.href?.startsWith('plan:')) openPlan(n.href.slice(5)); else if (n.href?.startsWith('place:')) go('place', { id: n.href.slice(6) }); else if (n.href === 'friends') go('friends'); else if (n.href === 'feed') tab('feed'); break; }
+      case 'invite-add': { await api('/friends', { userId: id }); await refresh(); replace('friends'); toast('Friend request sent.'); break; }
+      case 'location': ui.locationStatus = 'fallback'; ui.location = null; await ensureLocation(); await refresh(); toast(ui.location ? 'Using your location for near-me picks.' : 'Using the OSU demo location.'); break;
       case 'addfriends': go('addfriends'); break;
       case 'settings': go('settings'); break;
       case 'crew': openCrew({ placeId: el.dataset.place || null, placeName: el.dataset.placeName || null }); break;
-      case 'crew-pick': { const d = S.chat.find(m => m.id === id)?.draft || {}; openCrew({ friends: d.friends || [], placeId: d.placeId || null, placeName: d.place || null, query: d.query || 'restaurants' }); break; }
+      case 'crew-pick': { const d = S.chat.find(m => m.id === id)?.draft || {}; openCrew({ friends: d.friends || [], placeId: d.placeId || null, placeName: d.place || null, query: d.query || 'restaurants', draft: d }); break; }
       case 'crew-start': await startCrew(); break;
       case 'crew-close': ui.crew.open = false; render(); break;
       case 'crew-toggle': { const set = ui.crew.friends; set.has(id) ? set.delete(id) : set.add(id); render(); break; }

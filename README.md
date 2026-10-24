@@ -11,7 +11,6 @@ npm start
 ```
 
 On this Windows machine, where Node is not on PATH:
-
 ```powershell
 .\start.ps1
 ```
@@ -45,7 +44,7 @@ The model name is configurable; use one available to your account. Gemini interp
 ```dotenv
 AGENT_PROVIDER=nvidia
 NVIDIA_API_KEY=your-key
-NVIDIA_MODEL=meta/llama-3.3-70b-instruct
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 NVIDIA supplies the personal-agent model through its chat-completions API. Web search is a separate capability: the current search adapter uses Gemini grounding and therefore also needs a Gemini key plus `ENABLE_WEB_SEARCH=true`. NVIDIA inference alone does not supply a browser.
@@ -76,7 +75,14 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 
 ## Privacy boundary
 
-`Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. A person’s model gets only their own private context. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
+`Engine.state()` and `planView()` enumerate public fields. Another user’s context, personal chat, memories, password hash, and plan overrides never serialize into your response. The shared negotiation log accepts fixed message types and phrases, not model-generated prose. The host sees an alternative time or “a cheaper option is needed,” never another person’s exact spending limit or private reason.
+
+- **Model inputs are allow-listed.** A person’s model gets only the fields it reasons over from their own context (budget, hours, days, diet, preferences, interests, energy). Saved-memory history, raw web text, rendered search HTML, and URLs are not sent.
+- **Nothing publishes from chat without consent.** When you mention a place you liked, your agent suggests a review; you write the note and post it. Your chat message is never used as the quote.
+- **Strict diets need evidence.** A strict diet (e.g. “halal”, not “halal preferred”) passes when a well-rated review the person can see is tagged with it, or when a web source claims it. A web-only pass gets a private “check with the restaurant” note from that person’s own agent; the group is never told anyone’s diet.
+- **Untrusted text is kept out of instructions.** User-added items’ names never reach web search or the chat model, and listed venues enter the search prompt as a labelled data block.
+- **Shared free time is coarse.** “It’s a match” cards say “Both free Saturday evening”, never the exact overlap, which would reveal a friend’s private hours.
+- **Accepted trade-off:** because counters say *what* kind of change is needed, a host who keeps revising one plan can narrow down a friend’s rough budget band or free hours. Disco is built for trusted friend groups, so this is accepted; exact values and reasons still stay with each agent.
 
 The application server stores the contexts and is trusted infrastructure; this is logical per-agent access separation, not end-to-end encryption or isolated model processes. The local demo is bound to loopback by default. Production rollout would need HTTPS, deployment configuration, account management, stronger operational controls, and a proper database migration strategy.
 
@@ -84,9 +90,9 @@ The application server stores the contexts and is trusted infrastructure; this i
 
 `scripts/import_seed.py` reads the supplied workbook without changing it. `data/seed.json` contains its 20 sheets, including four main people, 32 fictional secondary people, 308 synthetic opinions, 112 network edges, and 4,251 OSM places plus 90 starter venue rows. Duplicate venue listings from different sources retain their original identifiers.
 
-Synthetic reviews are labeled throughout the UI. The original sentiment-only rows receive explicitly described derived taste scores. Venue artwork is original illustrative SVG, not photography of the named venue. Hours and prices are not fabricated. A plan’s **proposed meal allowance is not a restaurant price**.
+Synthetic reviews are labeled throughout the UI. The original sentiment-only rows receive explicitly described derived taste scores. With `GOOGLE_PLACES_KEY`, chat, place, and match cards show the venue’s Google Places photo (credited to its photographer); without it they show an OpenStreetMap map snippet. Feed review cards keep a placeholder until reviewers can upload their own photos. Hours and prices are not fabricated. A plan’s **proposed meal allowance is not a restaurant price**.
 
-OpenStreetMap data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under ODbL; source links are retained with each listing.
+OpenStreetMap data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under ODbL; source links are retained with each listing, and the app credits OSM on the profile screen. Venue photos, street addresses for OSM venues without one, and the place-page map come from Google Maps Platform and are shown with Google’s attribution.
 
 ## Tests
 
