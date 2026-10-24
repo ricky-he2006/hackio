@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, MAIN_IDS } from '../lib/data.mjs';
-import { Engine, nextSaturday, evaluatePrivate, timeString, listedHours } from '../lib/engine.mjs';
+import { Engine, nextSaturday, evaluatePrivate, timeString, listedHours, minutes } from '../lib/engine.mjs';
 import { createApp } from '../server.mjs';
 
 const dayOfWeek = date => new Date(`${date}T12:00:00Z`).getUTCDay();
@@ -780,4 +780,36 @@ test('stuck-plan suggestions are tailored: each one passes every friend\'s priva
   assert.deepEqual(engine.state('daniel').plans.find(x => x.id === planId)?.suggestions || [], [], 'only the host does');
   await engine.chat('ricky', { text: suggestions[0].text, planId }); await engine.jobs.get(planId);
   assert.equal(p.state, 'awaiting_approval', `tapping "${suggestions[0].text}" resolves it`); store.close();
+});
+
+test('private calendar: busy blocks steer only your own agent and never reach friends', async () => {
+  const { store, engine } = setup(), date = nextSaturday();
+  engine.calendarBlock('arnav', { date, start: '18:00', end: '23:59', title: 'Chem midterm study' });
+  assert.equal(engine.state('arnav').me.calendar[0].title, 'Chem midterm study');
+  const { planId } = engine.createPlan('ricky', { friends: ['arnav'], date, time: '19:00', allowance: 15 }); await engine.jobs.get(planId);
+  const p = engine.d.plans.find(x => x.id === planId);
+  assert.equal(p.state, 'needs_decision', 'Arnav’s agent turns down his busy evening');
+  const tips = engine.stuckSuggestions(p);
+  assert.ok(tips.length && tips.every(t => (t.option.date || p.option.date) !== date), 'every suggestion moves off the busy evening');
+  const seen = JSON.stringify([engine.state('ricky'), engine.planView(p, 'ricky')]);
+  assert.ok(!seen.includes('Chem midterm') && !seen.includes('23:59'), 'the host sees neither the title nor the times');
+  assert.throws(() => engine.calendarBlock('arnav', { date, start: '20:00', end: '19:00' }), /after the start/);
+  engine.calendarBlock('arnav', { remove: engine.state('arnav').me.calendar[0].id });
+  assert.equal(engine.state('arnav').me.calendar.length, 0);
+  store.close();
+});
+
+test('agents refuse to double-book someone already committed to another adventure', async () => {
+  const { store, engine } = setup(), date = nextSaturday();
+  const first = engine.createPlan('ricky', { friends: ['aditya'], date, time: '21:00', allowance: 15 }); await engine.jobs.get(first.planId);
+  const p1 = engine.d.plans.find(x => x.id === first.planId);
+  assert.equal(p1.state, 'awaiting_approval');
+  const other = engine.createPlan('arnav', { friends: ['aditya'], date: p1.option.date, time: p1.option.time, allowance: 15 }); await engine.jobs.get(other.planId);
+  assert.equal(engine.d.plans.find(x => x.id === other.planId).state, 'awaiting_approval', 'not committed yet, so no clash');
+  engine.cancel('arnav', other.planId);
+  engine.approve('ricky', p1.id, p1.revision); engine.rsvp('aditya', p1.id, 'in');
+  const second = engine.createPlan('arnav', { friends: ['aditya'], date: p1.option.date, time: p1.option.time, allowance: 15 }); await engine.jobs.get(second.planId);
+  const p2 = engine.d.plans.find(x => x.id === second.planId);
+  assert.ok(!(p2.option.date === p1.option.date && Math.abs(minutes(p2.option.time) - minutes(p1.option.time)) < 60), 'never overlaps the adventure Aditya already said yes to');
+  store.close();
 });

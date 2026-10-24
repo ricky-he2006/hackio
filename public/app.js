@@ -677,9 +677,36 @@ function adventuresScreen() {
   const upcoming = S.plans.filter(p => p.option.date >= today).sort((a, b) => rank(a) - rank(b) || a.option.date.localeCompare(b.option.date));
   const past = S.plans.filter(p => p.option.date < today).sort((a, b) => b.option.date.localeCompare(a.option.date));
   return `${titlebar('Adventures', { back: false, cls: 'top', right: `<button class="pill primary h44 shadow" data-action="crew">${I.plus}New</button>` })}
-  <main class="content gap-18" data-scroll><h2 class="eyebrow tight">Upcoming</h2>
+  <main class="content gap-18" data-scroll><div class="seg" role="tablist" aria-label="Adventures view"><button role="tab" aria-selected="${ui.adv !== 'calendar'}" data-action="adv-view" data-value="list">List</button><button role="tab" aria-selected="${ui.adv === 'calendar'}" data-action="adv-view" data-value="calendar">Calendar</button></div>
+    ${ui.adv === 'calendar' ? calendarView() : `<h2 class="eyebrow tight">Upcoming</h2>
     ${upcoming.map(advCard).join('') || `<div class="card empty-card"><p class="h-19">The group chat could never.</p><p class="meta">Pick your people. Your agents handle the back-and-forth.</p><button class="btn primary h48" style="width:100%" data-action="crew">Start an adventure</button></div>`}
-    ${past.length ? `<h2 class="eyebrow" style="margin-bottom:-6px">Past</h2>${past.map(pastRow).join('')}` : ''}</main>${tabbar('adventures')}`;
+    ${past.length ? `<h2 class="eyebrow" style="margin-bottom:-6px">Past</h2>${past.map(pastRow).join('')}` : ''}`}</main>${tabbar('adventures')}`;
+}
+/* Your calendar: adventures plus private busy times. Busy times stay with your agent, which plans around them without saying why. */
+function calendarView() {
+  const today = todayISO(), day = ui.calDay || today, month = ui.calMonth || day.slice(0, 7);
+  const [y, m] = month.split('-').map(Number), first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate();
+  const iso = n => `${month}-${String(n).padStart(2, '0')}`, shift = k => { const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const plansOn = d => S.plans.filter(p => p.option.date === d && p.state !== 'cancelled').sort((a, b) => a.option.time.localeCompare(b.option.time));
+  const busyOn = d => (S.me.calendar || []).filter(b => b.date === d);
+  const cells = [...Array(first.getDay()).fill('<span></span>'), ...Array.from({ length: days }, (_, i) => {
+    const d = iso(i + 1), dots = [...plansOn(d).map(p => `<i style="background:${status(p).bg}"></i>`), ...busyOn(d).map(() => '<i class="busy"></i>')].slice(0, 3).join('');
+    return `<button class="cal-day ${d === today ? 'today' : ''} ${d < today ? 'past' : ''}" data-action="cal-day" data-id="${d}" aria-pressed="${d === day}" aria-label="${dparts(d).short}${dots ? ', has events' : ''}">${i + 1}<span class="cal-dots">${dots}</span></button>`;
+  })];
+  const pv = S.me.private, usual = pv.days.includes(dparts(day).long), busy = busyOn(day), dp = dparts(day);
+  return `<section class="card r16 pad-16 sh-4 col gap-10"><div class="row between"><button class="icon-circle" data-action="cal-month" data-value="${shift(-1)}" aria-label="Previous month">${I.back}</button>
+      <h2 class="h-19">${first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h2><button class="icon-circle flip" data-action="cal-month" data-value="${shift(1)}" aria-label="Next month">${I.back}</button></div>
+    <div class="cal" role="group" aria-label="Days">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(w => `<span class="cal-w" aria-hidden="true">${w}</span>`).join('')}${cells.join('')}</div>
+    <p class="meta-12 row gap-8 wrap"><span class="cal-key"><i style="background:#79D18A"></i>Confirmed</span><span class="cal-key"><i style="background:#FF6F59"></i>Needs you</span><span class="cal-key"><i style="background:#FFD666"></i>Working</span><span class="cal-key"><i class="busy"></i>Busy</span></p></section>
+    <h2 class="eyebrow tight">${esc(dp.long)}, ${esc(dp.md)}</h2>
+    <p class="meta">${usual ? `Usually free ${t12(pv.start)} – ${t12(pv.end)}` : 'Not one of your usual free days'}. <button class="link" data-action="settings">Change</button></p>
+    ${plansOn(day).map(advCard).join('')}
+    ${busy.map(b => `<div class="card row gap-10" style="padding:10px 12px"><span class="cal-key"><i class="busy"></i></span><span class="grow stack"><span class="body-15 strong">${esc(b.title)}</span><span class="meta-12">${t12(b.start)} – ${t12(b.end)}</span></span><button class="pill" data-action="cal-remove" data-id="${esc(b.id)}" aria-label="Remove ${esc(b.title)}">Remove</button></div>`).join('')}
+    ${!plansOn(day).length && !busy.length ? '<p class="meta">Nothing planned.</p>' : ''}
+    ${day >= today ? `<form id="busy-form" class="card r16 pad-16 form"><p class="eyebrow row gap-8">${I.lock} Busy time · only you see this</p><input type="hidden" name="date" value="${day}">
+      <label class="lbl">What is it?<input class="input" name="title" maxlength="60" placeholder="e.g. Chem midterm"></label>
+      <div class="two"><label class="lbl">From<input class="input" name="start" type="time" value="18:00" required></label><label class="lbl">Until<input class="input" name="end" type="time" value="21:00" required></label></div>
+      <button class="btn primary">Add busy time</button><p class="meta">Your agent plans around it and just tells the group “another time is needed”. Adventures you’ve said yes to count as busy automatically.</p></form>` : ''}`;
 }
 function advCard(p) {
   const st = status(p), d = dparts(p.option.date), cancelled = st.key === 'cancelled';
@@ -1032,6 +1059,10 @@ document.addEventListener('click', async event => {
       case 'additem': go('additem'); break;
       case 'filter': ui.filter = el.dataset.value; render(); break;
       case 'ptab': ui.ptab = el.dataset.value; render(); break;
+      case 'adv-view': ui.adv = el.dataset.value; render(); break;
+      case 'cal-day': ui.calDay = id; render(); break;
+      case 'cal-month': ui.calMonth = el.dataset.value; ui.calDay = el.dataset.value === todayISO().slice(0, 7) ? todayISO() : `${el.dataset.value}-01`; render(); break;
+      case 'cal-remove': await api('/calendar/block', { remove: id }); await refresh(); toast('Busy time removed.'); break;
       case 'profile-sort': ui.psort = el.dataset.profileSort; render(); break;
       case 'cat-toggle': ui.catOpen = !ui.catOpen; render(); break;
       case 'cat': ui.pcat = el.dataset.value; ui.catOpen = false; render(); break;
@@ -1128,6 +1159,7 @@ document.addEventListener('submit', async event => {
     }
     if (form.id === 'tweak-form') { const id = form.dataset.id; await api('/plans/revise', { planId: id, option: { ...Object.fromEntries(data), allowance: Number(data.get('allowance')) } }); await refresh(); replace('working', { id }); }
     if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); await refresh(); back(); toast('Private settings saved.'); }
+    if (form.id === 'busy-form') { await api('/calendar/block', { date: data.get('date'), title: data.get('title'), start: data.get('start'), end: data.get('end') }); await refresh(); toast('Busy time added. Your agent will plan around it.'); }
     if (form.id === 'proactive-settings-form') { await api('/proactive/settings', { enabled: data.get('enabled') === 'on', shareSavedPlaces: data.get('shareSavedPlaces') === 'on', allowedFriends: data.getAll('allowedFriends'), notificationFrequency: data.get('notificationFrequency') }); await refresh(); toast('Proactive planning settings saved.'); }
     if (form.id === 'item-form') { const place = await api('/items', Object.fromEntries(data)); replace('log', { id: place.id }); }
   } catch (error) { toast(error.message); } finally { if (submit?.isConnected) submit.disabled = false; }

@@ -154,8 +154,11 @@ test('one person can start at most 12 negotiations involving the same friend per
 });
 
 // Plan states reached through the real engine; ricky hosts, aditya and arnav are invited, daniel is a friend left out.
+// Each plan gets its own Saturday: agents now refuse to double-book someone already committed to an earlier one.
+let saturdays = 0;
+const nthSaturday = n => { const d = new Date(`${nextSaturday()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 7 * n); return d.toISOString().slice(0, 10); };
 async function planIn(engine, state) {
-  const { planId } = engine.createPlan('ricky', { friends: ['aditya', 'arnav'], date: nextSaturday(), time: '21:00', allowance: 15 });
+  const { planId } = engine.createPlan('ricky', { friends: ['aditya', 'arnav'], date: nthSaturday(saturdays++ % 8), time: '21:00', allowance: 15 });
   await engine.jobs.get(planId); const p = engine.d.plans.find(x => x.id === planId);
   assert.equal(p.state, 'awaiting_approval');
   if (state !== 'awaiting_approval') engine.approve('ricky', p.id, p.revision);
