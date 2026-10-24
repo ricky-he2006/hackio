@@ -72,6 +72,19 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 - All 18 screens from `App Mockups.html`: chat recommendations, chat-started plans with a live “rounding up your party” card, working it out, approval sheet, invite, plan changed (including “keep the original time without them”), feed with comments and want-to-try activity, place pages with friend tag counts, log it, profile lists by category, adventures with status stickers, adventure details, friends (accept/decline), add friends with an invite link and QR code, welcome, quick rate (answers become rough ratings), want-to-try match cards with a shared free-time conclusion, and rate the night.
 - Onboarding imports (music, maps, streaming) are demo toggles only; nothing is imported. Contacts are not read.
 - Four independent mobile sessions displayed together, with live updates through authenticated server-sent events.
+- Opt-in proactive shared-venue suggestions: connected friends can independently save the same venue, receive privacy-safe interest prompts, consent independently, and hand the resulting opportunity to the existing bounded negotiation and approval flow.
+
+### Proactive planning
+
+Proactive planning is off by default. In **Settings**, a user must enable suggestions and explicitly allow saved-place interest to be shared. The initial prompt never names the other people or reveals their saved places. Quiet hours and the default one-suggestion-per-day limit are enforced by the server.
+
+The core endpoints are authenticated:
+
+- `POST /api/proactive/settings` — update opt-in and sharing controls.
+- `POST /api/proactive/respond` — accept, defer, or decline one interest check.
+- `POST /api/proactive/start` — start the existing planning negotiation after every eligible participant consents; only the first consenting organizer may start it.
+
+Opportunity records, participant consent, typed coordination messages, and notification metadata are persisted inside the encrypted state store. Other triggers (similar interests, events, and group bucket lists) remain intentionally deferred.
 
 ## Privacy boundary
 

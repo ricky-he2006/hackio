@@ -359,11 +359,21 @@ function chatScreen() {
   body += S.chat.map((m, i) => message(m, latest[m.planId] === i, i === S.chat.length - 1)).join('');
   if (pending) body += `<div class="thinking" role="status"><i></i><i></i><i></i><span>Your agent is on it…</span></div>`;
 
+  body += (S.proactive?.opportunities || []).filter(o => ['awaiting_interest', 'deferred', 'consented'].includes(o.status)).map(proactiveCard).join('');
   body += S.matches.map(matchCard).join('');
   const working = S.plans.some(p => p.isHost && p.state === 'negotiating');
   return `${brandbar(`<button class="icon-circle" data-action="chats" aria-label="All chats and adventures">${I.comment}</button><button class="icon-circle me" data-action="tab" data-view="you" aria-label="Your profile" style="--bg:${colorOf(S.me)}">${avatarFace(S.me)}</button>`)}
   <main class="content" id="chat-log" data-scroll aria-label="Conversation">${body}</main>
   <form class="composer" id="chat-form"><label class="sr-only" for="message">Message your agent</label><input id="message" class="field" autocomplete="off" maxlength="2000" placeholder="${working ? 'Add someone, change the time, anything' : 'Where to? Ask or plan anything'}" value="${esc(drafts.message || '')}"><button class="send" type="submit" aria-label="Send" ${pending ? 'disabled' : ''}>${I.send}</button></form>${tabbar('chat')}`;
+}
+function proactiveCard(o) {
+  const accepted = o.interestStatus === 'accepted', deferred = o.interestStatus === 'deferred', ready = o.status === 'consented';
+  return `<article class="card lav pad-14 sh-5 col gap-10 proactive-card">
+    <p class="eyebrow">A private group idea</p>
+    <div class="row gap-12"><div class="grow"><h2 class="h-21">${esc(o.venue.name)}</h2><p class="meta">${esc(o.venue.area || 'Columbus')} · ${o.eligibleParticipantCount} possible people</p></div>${photo(o.venue, '', 't56', true, true)}</div>
+    <p class="body-14">${ready ? 'Everyone is interested. Your agents can now look for a time that works.' : accepted ? 'Nice. I’ll wait for the other agents before checking times.' : deferred ? 'I’ll leave this here and won’t keep nudging you.' : 'Some friends may be interested in this place too. Want me to explore a group outing?'}</p>
+    ${ready ? (o.isOrganizer ? `<button class="btn primary h44" data-action="proactive-start" data-id="${esc(o.id)}">Check times privately</button>` : '<p class="check">' + I.check + '<span>Everyone is interested</span></p>') : accepted ? '<p class="check">' + I.check + '<span>You’re interested</span></p>' : `<div class="row gap-8"><button class="btn primary h44" data-action="proactive-respond" data-id="${esc(o.id)}" data-response="accepted">I’m down</button><button class="btn h44" data-action="proactive-respond" data-id="${esc(o.id)}" data-response="deferred">Maybe later</button><button class="btn h44" data-action="proactive-respond" data-id="${esc(o.id)}" data-response="declined">Not interested</button></div>`}
+  </article>`;
 }
 /* An adventure's own chat: its plan updates, invitations, and anything said about it, apart from main-chat recommendations. */
 function threadScreen(r) {
@@ -644,6 +654,12 @@ function settingsScreen() {
       <label class="lbl">Anything else<textarea class="textarea" name="preferences" rows="2">${esc(p.preferences)}</textarea></label>
       <label class="lbl">Social energy<select class="select" name="energy">${['low', 'medium', 'high'].map(e => `<option ${p.energy === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>
       <button class="btn primary lg">Save private settings</button><p class="meta">Your agent shares conclusions like “free after 8:30”, never these values.</p></form>
+    <form id="proactive-settings-form" class="card r16 pad-16 sh-4 form"><p class="eyebrow">Proactive planning</p>
+      <label class="check-row"><input type="checkbox" name="enabled" ${S.proactive?.settings?.enabled ? 'checked' : ''}><span><b>Suggest group outings</b><small>Let your agent notice low-pressure opportunities.</small></span></label>
+      <label class="check-row"><input type="checkbox" name="shareSavedPlaces" ${S.proactive?.settings?.shareSavedPlaces ? 'checked' : ''}><span><b>Share saved-place interest</b><small>Only with friends who also opt in. Other people’s private saves stay hidden.</small></span></label>
+      <fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow">Friends who may be included</legend><div class="toggle-row">${S.friends.map(f => `<label><input type="checkbox" name="allowedFriends" value="${esc(f.id)}" ${S.proactive?.settings?.allowedFriends?.includes(f.id) ? 'checked' : ''}><span class="plain">${first(f)}</span></label>`).join('')}</div><p class="meta">Leave all unchecked to allow any friend who has also opted in.</p></fieldset>
+      <label class="lbl">Suggestion frequency<select class="select" name="notificationFrequency">${['daily', 'often', 'never'].map(f => `<option value="${f}" ${S.proactive?.settings?.notificationFrequency === f ? 'selected' : ''}>${cap(f)}</option>`).join('')}</select></label>
+      <p class="meta">Suggestions respect quiet hours and never become invitations without approval.</p><button class="btn lg">Save proactive settings</button></form>
     <button class="card pad row gap-10" data-action="prompt" data-text="What do you remember about me?"><span class="grow body-15 strong">What does my agent remember?</span>${I.chevron}</button>
     ${Object.keys(S.me.temporary).length ? `<div class="card pad col gap-8"><p class="body-14">Some preferences from chat apply to this conversation only.</p><button class="pill" style="align-self:flex-start" data-action="clear-temporary">Clear them</button></div>` : ''}
     <div class="row between"><span class="meta">${S.provider.provider === 'local' ? 'Local demo agents (not an LLM)' : `Agent: ${esc(S.provider.provider)}`}</span><button class="pill" data-action="logout">Log out</button></div></main>`;
@@ -1015,6 +1031,8 @@ document.addEventListener('click', async event => {
       case 'comments': ui.comments.has(id) ? ui.comments.delete(id) : ui.comments.add(id); render(); break;
       case 'like': await api('/like', { reviewId: id }); await refresh(); break;
       case 'save': { const result = await api('/save', { placeId: id }); toast(result.saved ? 'Added to Want to try. Your friends can see it.' : 'Removed from Want to try.'); await refresh(); if (cur().name === 'place') { cur().data = await api('/place?id=' + encodeURIComponent(id)); render(); } break; }
+      case 'proactive-respond': { el.disabled = true; await api('/proactive/respond', { opportunityId: id, response: el.dataset.response }); await refresh(); toast(el.dataset.response === 'accepted' ? 'I’ll ask the other agents privately.' : 'Got it. I won’t push this suggestion.'); break; }
+      case 'proactive-start': { el.disabled = true; const plan = await api('/proactive/start', { opportunityId: id }); await refresh(); openPlan(plan.planId); break; }
       case 'tag': { const set = ui.logs[id].tags; set.has(el.dataset.value) ? set.delete(el.dataset.value) : set.add(el.dataset.value); render(); break; }
       case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
       case 'post-review': {
@@ -1030,7 +1048,7 @@ document.addEventListener('click', async event => {
       case 'friend-profile': go('friend-profile', { id }); break;
       case 'notifications': go('notifications'); break;
       case 'notifications-read': for (const n of S.notifications || []) ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); render(); break;
-      case 'notification': { const n = S.notifications.find(x => x.id === id); if (!n) break; ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); if (n.href?.startsWith('plan:')) openPlan(n.href.slice(5)); else if (n.href?.startsWith('place:')) go('place', { id: n.href.slice(6) }); else if (n.href === 'friends') go('friends'); else if (n.href === 'feed') tab('feed'); break; }
+      case 'notification': { const n = S.notifications.find(x => x.id === id); if (!n) break; ui.readNotifications.add(n.unreadKey); localStorage.setItem(`disco-read-${slot}`, JSON.stringify([...ui.readNotifications])); if (n.href?.startsWith('plan:')) openPlan(n.href.slice(5)); else if (n.href?.startsWith('place:')) go('place', { id: n.href.slice(6) }); else if (n.href?.startsWith('opportunity:')) tab('chat'); else if (n.href === 'friends') go('friends'); else if (n.href === 'feed') tab('feed'); break; }
       case 'invite-add': { await api('/friends', { userId: id }); await refresh(); replace('friends'); toast('Friend request sent.'); break; }
       case 'location': ui.locationStatus = 'fallback'; ui.location = null; await ensureLocation(); await refresh(); toast(ui.location ? 'Using your location for near-me picks.' : 'Using the OSU demo location.'); break;
       case 'addfriends': go('addfriends'); break;
@@ -1103,6 +1121,7 @@ document.addEventListener('submit', async event => {
     }
     if (form.id === 'tweak-form') { const id = form.dataset.id; await api('/plans/revise', { planId: id, option: { ...Object.fromEntries(data), allowance: Number(data.get('allowance')) } }); await refresh(); replace('working', { id }); }
     if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); await refresh(); back(); toast('Private settings saved.'); }
+    if (form.id === 'proactive-settings-form') { await api('/proactive/settings', { enabled: data.get('enabled') === 'on', shareSavedPlaces: data.get('shareSavedPlaces') === 'on', allowedFriends: data.getAll('allowedFriends'), notificationFrequency: data.get('notificationFrequency') }); await refresh(); toast('Proactive planning settings saved.'); }
     if (form.id === 'item-form') { const place = await api('/items', Object.fromEntries(data)); replace('log', { id: place.id }); }
   } catch (error) { toast(error.message); } finally { if (submit?.isConnected) submit.disabled = false; }
 });

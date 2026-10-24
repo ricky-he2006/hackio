@@ -14,6 +14,61 @@ test('prepared users authenticate; wrong passwords and fictional users do not', 
   assert.equal(store.login('ricky', 'wrong'), null); assert.equal(store.login('demo_001', 'disco2026'), null); store.close();
 });
 
+test('proactive shared-venue detection is opt-in, private, and idempotent', () => {
+  const { store, engine } = setup(), venue = engine.quickPicks('ricky')[0].place.id;
+  for (const id of ['ricky', 'aditya', 'daniel']) engine.proactiveSettings(id, { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue); engine.savePlace('daniel', venue);
+  const active = engine.d.opportunities.filter(o => o.status === 'awaiting_interest');
+  assert.equal(active.length, 1);
+  assert.deepEqual(active[0].participants.map(p => p.userId).sort(), ['aditya', 'daniel', 'ricky']);
+  assert.equal(engine.state('ricky').proactive.opportunities[0].participants.length, 0, 'friend identities stay hidden before consent');
+  assert.match(engine.notifications('ricky').find(n => n.kind === 'proactive_interest').body, /Some friends may be interested/);
+  engine.detectProactive(venue);
+  assert.equal(engine.d.opportunities.filter(o => !['superseded', 'cancelled', 'expired'].includes(o.status)).length, 1);
+  store.close();
+});
+
+test('proactive consent is recorded per user and requires every eligible participant', () => {
+  const { store, engine } = setup(), venue = engine.quickPicks('ricky')[0].place.id;
+  for (const id of ['ricky', 'aditya']) engine.proactiveSettings(id, { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue);
+  const opportunity = engine.d.opportunities[0];
+  engine.respondProactive('ricky', opportunity.id, 'accepted');
+  assert.equal(opportunity.status, 'awaiting_interest');
+  engine.respondProactive('aditya', opportunity.id, 'accepted');
+  assert.equal(opportunity.status, 'consented');
+  assert.equal(opportunity.organizerId, 'ricky');
+  assert.ok(opportunity.messages.every(message => message.payload.response === 'accepted'));
+  store.close();
+});
+
+test('proactive planning hands only the consenting group into the existing negotiator', async () => {
+  const { store, engine } = setup(), venue = engine.quickPicks('ricky')[0].place.id;
+  for (const id of ['ricky', 'aditya']) engine.proactiveSettings(id, { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue);
+  const opportunity = engine.d.opportunities[0];
+  engine.respondProactive('ricky', opportunity.id, 'accepted');
+  engine.respondProactive('aditya', opportunity.id, 'accepted');
+  const result = engine.startProactivePlan('ricky', opportunity.id);
+  await engine.jobs.get(result.planId);
+  const plan = engine.d.plans.find(p => p.id === result.planId);
+  assert.deepEqual(plan.participants, ['ricky', 'aditya']);
+  assert.equal(opportunity.status, 'negotiating');
+  assert.equal(opportunity.planId, result.planId);
+  assert.throws(() => engine.startProactivePlan('arnav', opportunity.id), /organizer/);
+  store.close();
+});
+
+test('proactive matching excludes opt-out users and non-friends', () => {
+  const { store, engine } = setup(), venue = engine.quickPicks('ricky')[0].place.id;
+  engine.proactiveSettings('ricky', { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.proactiveSettings('aditya', { enabled: false, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.proactiveSettings('demo_001', { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue); engine.savePlace('demo_001', venue);
+  assert.equal(engine.d.opportunities.length, 0);
+  store.close();
+});
+
 test('full plan: negotiate, approve, invite, RSVP, revise, reconfirm, simulate booking', async () => {
   const { store, engine } = setup(); const p = await start(engine);
   assert.equal(p.state, 'awaiting_approval'); assert.equal(p.option.time, '20:30'); assert.ok(p.option.allowance <= 18);

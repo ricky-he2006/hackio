@@ -125,6 +125,9 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/chat': result = await engine.chat(id, input); break;
         case '/api/adventure-draft': result = await engine.adventureDraft(id, input); break;
         case '/api/settings': result = engine.settings(id, input); break;
+        case '/api/proactive/settings': result = engine.proactiveSettings(id, input); break;
+        case '/api/proactive/respond': result = engine.respondProactive(id, input.opportunityId, input.response); break;
+        case '/api/proactive/start': result = engine.startProactivePlan(id, input.opportunityId); break;
         case '/api/avatar': result = engine.setAvatar(id, input); break;
         case '/api/review-photo': result = engine.setReviewPhoto(id, input); break;
         case '/api/onboard': result = engine.onboard(id, input); break;
