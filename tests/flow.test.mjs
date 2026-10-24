@@ -690,3 +690,22 @@ test('stuck-adventure quick replies are understood: spending limit and another p
   assert.ok(engine.user('ricky').threads[planId].messages.some(m => /^On it: trying up to \$30 each/.test(m.text)), 'allowances round down to $5 steps');
   store.close();
 });
+
+test('review photos: owner-only upload, signed URLs friends receive, kept on edit, and removable', async t => {
+  const { store, engine } = setup();
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]), dataUrl = (type, buf) => `data:${type};base64,${buf.toString('base64')}`;
+  const venue = Object.values(store.data.places).find(p => /restaurant/i.test(p.category)).id;
+  const review = engine.review('ricky', { placeId: venue, rating: 9, quote: 'Great tacos, sat on the patio.', tags: [] });
+  assert.throws(() => engine.setReviewPhoto('aditya', { reviewId: review.id, image: dataUrl('image/jpeg', jpeg) }), /only change your own review/);
+  assert.throws(() => engine.setReviewPhoto('ricky', { reviewId: review.id, image: dataUrl('image/png', Buffer.from('<svg onload="x()"/>')) }), /JPEG, PNG, or WebP/);
+  const { photo } = engine.setReviewPhoto('ricky', { reviewId: review.id, image: dataUrl('image/jpeg', jpeg) });
+  const seen = engine.state('aditya').feed.find(r => r.id === review.id); assert.equal(seen.photo, photo, 'a friend gets the signed URL');
+  engine.review('ricky', { placeId: venue, rating: 8, quote: 'Still great, a bit busier.', tags: [] }); assert.equal(engine.state('ricky').myReviews.find(r => r.id === review.id).photo, photo, 'editing keeps the photo');
+  const { server } = createApp({ store, engine }); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const res = await fetch(base + photo); assert.equal(res.status, 200); assert.equal(res.headers.get('content-type'), 'image/jpeg'); assert.deepEqual(Buffer.from(await res.arrayBuffer()), jpeg);
+  assert.equal((await fetch(base + photo.replace(/sig=[^&]+/, 'sig=forged'))).status, 404, 'a forged signature is refused');
+  assert.equal((await fetch(base + photo.replace(/&sig=[^&]+/, ''))).status, 404, 'no signature, no photo');
+  engine.setReviewPhoto('ricky', { reviewId: review.id, remove: true }); assert.equal((await fetch(base + photo)).status, 404, 'removed photos stop serving');
+});

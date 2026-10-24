@@ -63,6 +63,11 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       if (req.method !== 'GET' && req.headers.origin) assert(req.headers.origin === `http://${req.headers.host}` || req.headers.origin === `https://${req.headers.host}`, 'Cross-origin request rejected.', 403);
       if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus(), defaultPassword: store.defaultPassword });
       // Public so the login screen can show faces before sign-in. Only stored, signature-checked images are served.
+      // Signed URL instead of a login header (image requests can't send one); see Engine.reviewPhotoUrl.
+      if (url.pathname === '/api/review-photo' && req.method === 'GET') {
+        const photo = engine.signedReviewPhoto(url.searchParams.get('id'), url.searchParams.get('v'), url.searchParams.get('sig')); assert(photo, 'Not found.', 404);
+        res.writeHead(200, { 'content-type': photo.type, 'content-length': photo.data.length, 'cache-control': 'private, max-age=86400' }); return res.end(photo.data);
+      }
       if (url.pathname === '/api/avatar' && req.method === 'GET') {
         const avatar = store.avatar(url.searchParams.get('id')); assert(avatar, 'Not found.', 404);
         res.writeHead(200, { 'content-type': avatar.type, 'content-length': avatar.data.length, 'cache-control': 'public, max-age=31536000, immutable' }); return res.end(req.method === 'HEAD' ? undefined : avatar.data);
@@ -112,14 +117,16 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         }
       }
       assert(req.method === 'POST', 'Not found.', 404);
-      if (url.pathname === '/api/avatar') assert(avatarLimit(id), 'Too many photo uploads. Try again in a minute.', 429);
-      const input = await body(req, url.pathname === '/api/avatar' ? 300_000 : 24000); let result = { ok: true };
+      const upload = ['/api/avatar', '/api/review-photo'].includes(url.pathname);
+      if (upload) assert(avatarLimit(id), 'Too many photo uploads. Try again in a minute.', 429);
+      const input = await body(req, url.pathname === '/api/review-photo' ? 600_000 : upload ? 300_000 : 24000); let result = { ok: true };
       switch (url.pathname) {
         case '/api/logout': store.logout(token); break;
         case '/api/chat': result = await engine.chat(id, input); break;
         case '/api/adventure-draft': result = await engine.adventureDraft(id, input); break;
         case '/api/settings': result = engine.settings(id, input); break;
         case '/api/avatar': result = engine.setAvatar(id, input); break;
+        case '/api/review-photo': result = engine.setReviewPhoto(id, input); break;
         case '/api/onboard': result = engine.onboard(id, input); break;
         case '/api/temporary/clear': user.temporary = {}; user.pendingMemory = null; store.save(); break;
         case '/api/memory': result = engine.memory(id, input); break;

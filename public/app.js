@@ -101,8 +101,15 @@ function hoursOn(raw, day) {
 }
 const hoursLabel = (p, day = 6) => { const h = hoursOn(p?.hours, day); return h ? `Open ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]} ${ampm(h[0])}–${ampm(h[1])}` : ''; };
 const meta = parts => esc(parts.filter(Boolean).join(' · '));
+// The exact posting time for a tooltip; date-only seed reviews say so rather than inventing an hour.
+const fullTime = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${new Date(`${value}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (time not recorded)` : Number.isFinite(Date.parse(value)) ? `Posted ${new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : '';
 function ago(value) {
-  const t = Date.parse(String(value).length === 10 ? `${value}T12:00:00` : value), s = (Date.now() - t) / 1000;
+  // Date-only values (older seed reviews) have no time of day, so they get day precision: Today / Yesterday / Nd / Oct 21.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    const days = Math.round((new Date(new Date().toLocaleDateString('en-CA') + 'T12:00:00') - new Date(`${value}T12:00:00`)) / 86400000);
+    return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 7 ? `${days}d` : new Date(`${value}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  const t = Date.parse(value), s = (Date.now() - t) / 1000;
   if (!Number.isFinite(s)) return ''; if (s < 0) return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`; if (s < 86400) return `${Math.round(s / 3600)}h`; if (s < 172800) return 'Yesterday'; if (s < 604800) return `${Math.round(s / 86400)}d`;
   return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -483,7 +490,7 @@ function matchCard(m) {
 const FILTERS = ['All', 'Eat & Drink', 'Places', 'Live Events', 'Music', 'Movies & TV', 'Products'];
 function feedScreen() {
   const show = p => ui.filter === 'All' || group(p) === ui.filter || (ui.filter === 'Places' && ['Places', 'Eat & Drink', 'Live Events'].includes(group(p)));
-  const items = [...S.feed.filter(r => r.place && r.userId !== S.me.id && show(r.place)).map(r => ({ at: r.date, html: feedCard(r) })), ...(['All', 'Places', 'Eat & Drink'].includes(ui.filter) ? S.saves.map(s => ({ at: s.at, html: savesCard(s) })) : [])]
+  const items = [...S.feed.filter(r => r.place && show(r.place)).map(r => ({ at: r.date, html: feedCard(r) })), ...(['All', 'Places', 'Eat & Drink'].includes(ui.filter) ? S.saves.map(s => ({ at: s.at, html: savesCard(s) })) : [])]
     .sort((a, b) => String(b.at).localeCompare(String(a.at)));
   return `${brandbar(`<div class="header-actions"><button class="icon-circle" data-action="friends" aria-label="Friends">${I.addFriend}</button><button class="icon-circle" data-action="catalog" data-purpose="browse" aria-label="Search">${I.search()}</button></div>`)}
   <div class="chip-row filters" role="group" aria-label="Filter">${FILTERS.map(f => `<button class="chip" aria-pressed="${ui.filter === f}" data-action="filter" data-value="${esc(f)}">${esc(f)}</button>`).join('')}</div>
@@ -492,7 +499,7 @@ function feedScreen() {
 }
 // Review cards are for photos the reviewer uploads. Uploads aren't stored yet, so they keep the plain placeholder
 // (no map, no Google photo) until that exists; swap this helper's body when they are.
-const reviewPhoto = (p, style = '', cls = '') => `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(p.id)}" aria-label="Open ${esc(p.name)}"><span>${initials(p.name)}</span></button>`;
+const reviewPhoto = (r, style = '', cls = '') => `<button class="photo ${cls}" style="${style}" data-action="place" data-id="${esc(r.place.id)}" aria-label="Open ${esc(r.place.name)}">${r.photo ? `<img class="place-photo" src="${esc(r.photo)}" alt="${esc(`${nameOf(r.author)}’s photo at ${r.place.name}`)}">` : `<span>${initials(r.place.name)}</span>`}</button>`;
 function notificationsScreen() {
   const list = S.notifications || [];
   return `${titlebar('Notifications', { size: 't30', right: list.length ? '<button class="pill" data-action="notifications-read">Mark all read</button>' : '' })}<main class="content gap-8" data-scroll>
@@ -507,8 +514,8 @@ function invitePreviewScreen(r) {
 }
 function feedCard(r) {
   const p = r.place, media = ['Music', 'Movies & TV', 'Books', 'Products'].includes(p.category), saved = S.me.saved.includes(p.id), liked = r.likes.includes(S.me.id), open = ui.comments.has(r.id);
-  const body = media ? `<div class="row gap-12">${reviewPhoto(p, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${reviewPhoto(p, 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
-  return `<article class="card pad sh-4 col gap-10"><div class="row gap-10">${av(r.author, 36)}<div class="grow"><p class="body-14"><span class="strong">${nameOf(r.author)}</span> rated <button class="strong" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></p><p class="meta-12">${meta([typeTag(p)[0], p.area, ago(r.date), r.synthetic ? 'demo' : ''])}</p></div>${score(r.rating)}</div>
+  const body = media ? `<div class="row gap-12">${reviewPhoto(r, '', 'cover')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote></div>` : `${reviewPhoto(r, r.photo ? 'height:180px' : 'height:120px')}<blockquote class="quote q-25">“${esc(r.quote)}”</blockquote>`;
+  return `<article class="card pad sh-4 col gap-10"><div class="row gap-10">${av(r.author, 36)}<div class="grow"><p class="body-14"><span class="strong">${nameOf(r.author)}</span> rated <button class="strong" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button></p><p class="meta-12" title="${esc(fullTime(r.date))}">${meta([typeTag(p)[0], p.area, ago(r.date), r.synthetic ? 'demo' : ''])}</p></div>${score(r.rating)}</div>
     ${body}
     <div class="row gap-4"><button class="pill ghost h36" data-action="like" data-id="${esc(r.id)}" aria-pressed="${liked}" aria-label="Like, ${r.likes.length} likes">${I.heart(liked)}${r.likes.length}</button><button class="pill ghost h36" data-action="comments" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Comments, ${r.comments.length}">${I.comment}${r.comments.length}</button>
     <button class="pill h36" style="margin-left:auto" data-action="save" data-id="${esc(p.id)}" aria-pressed="${saved}">${I.bookmark(saved)}${saved ? 'Saved' : media ? 'Save' : 'Want to try'}</button></div>
@@ -545,8 +552,26 @@ const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great pat
 function initLog(p, suggested) {
   if (ui.logs[p.id]) return;
   const mine = S.myReviews.find(r => r.placeId === p.id);
-  ui.logs[p.id] = { rating: suggested ?? mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)) };
+  ui.logs[p.id] = { rating: suggested ?? mine?.rating ?? 8.5, tags: new Set((mine?.tags || []).filter(t => !['positive', 'mixed', 'negative', 'quick-rate', 'adventure'].includes(t)).map(cap)),
+    photo: mine?.photo || null, photoData: null, removePhoto: false };
   drafts.note = mine && !mine.tags.includes('quick-rate') ? mine.quote : '';
+}
+// Your own photo of the visit: this is what the feed card's image slot is for.
+function logPhotoSection(p, st) {
+  const shown = st.photoData || (!st.removePhoto && st.photo);
+  return `<section class="stack gap-8"><h2 class="field-label">Your photo</h2>
+    ${shown ? `<div class="photo" style="height:160px"><img class="place-photo" src="${esc(shown)}" alt="Your photo of ${esc(p.name)}"></div>` : '<p class="meta">Optional. Add a photo from your visit; friends see it on your review.</p>'}
+    <div class="row gap-8"><label class="pill" for="review-photo-input">${shown ? 'Change photo' : 'Add photo'}</label><input id="review-photo-input" type="file" accept="image/jpeg,image/png,image/webp" data-id="${esc(p.id)}" hidden>${shown ? `<button class="pill" data-action="review-photo-remove" data-id="${esc(p.id)}">Remove</button>` : ''}</div></section>`;
+}
+// Shrinks to at most 1280 px on the long side (keeps the shape), so uploads stay well under the server's 400 KB limit.
+async function pickReviewPhoto(file, placeId) {
+  const st = ui.logs[placeId]; if (!file || !st) return;
+  try {
+    const bitmap = await createImageBitmap(file), scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height)), canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    st.photoData = canvas.toDataURL('image/jpeg', 0.8); st.removePhoto = false; render();
+  } catch { toast('That file isn’t an image we can use.'); }
 }
 function logScreen(r) {
   const p = r.data;
@@ -558,6 +583,7 @@ function logScreen(r) {
     <section class="card r16 pad-16 sh-4 col gap-14"><div class="row between"><label for="rating" class="h-21">Your rating</label><span id="rate-bubble" class="score s68 ${scoreCls(st.rating)}" aria-hidden="true">${st.rating.toFixed(1)}</span></div>
       ${slider('rating', st.rating, 'Your rating', 'rate-bubble')}<div class="scale" aria-hidden="true"><span>0 · Skip it</span><span>5 · Fine</span><span>10 · Go now</span></div></section>
     <section class="stack gap-8"><label for="note" class="field-label">Note for friends</label><textarea id="note" class="textarea hand" style="height:96px" maxlength="2000" placeholder="What would you tell a friend?">${esc(drafts.note || '')}</textarea></section>
+    ${logPhotoSection(p, st)}
     <section class="stack gap-8"><h2 class="field-label">Tags</h2><div class="row wrap gap-8">${tags.map(t => `<button class="chip h34" aria-pressed="${st.tags.has(t)}" data-action="tag" data-id="${esc(p.id)}" data-value="${esc(t)}">${esc(t)}</button>`).join('')}
       ${ui.newTag ? `<form class="row gap-6" data-form="tag" data-id="${esc(p.id)}"><label class="sr-only" for="newtag">New tag</label><input id="newtag" class="field paper" style="height:34px;width:130px;font-size:13px" maxlength="30" placeholder="New tag" value="${esc(drafts.newtag || '')}"><button class="chip h34">Add</button></form>` : `<button class="chip h34 dashed" data-action="newtag" aria-label="Add a tag">+ Tag</button>`}</div></section>
   </main>
@@ -993,7 +1019,9 @@ document.addEventListener('click', async event => {
       case 'newtag': ui.newTag = true; render(); $('#newtag')?.focus(); break;
       case 'post-review': {
         const st = ui.logs[id], quote = String(drafts.note || '').trim(); if (quote.length < 3) { toast('Add a short note for friends first.'); $('#note')?.focus(); break; }
-        el.disabled = true; await api('/reviews', { reviewId: cur().reviewId, placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
+        el.disabled = true; const posted = await api('/reviews', { reviewId: cur().reviewId, placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
+        try { if (st.photoData) await api('/review-photo', { reviewId: posted.id, image: st.photoData }); else if (st.removePhoto) await api('/review-photo', { reviewId: posted.id, remove: true }); }
+        catch (error) { toast(`Posted, but the photo didn’t upload: ${error.message}`); }
         delete drafts.note; delete ui.logs[id]; await refresh(); back(); toast('Posted. Your friends’ picks just updated.'); break;
       }
       case 'edit-review': { const review = S.myReviews.find(r => r.placeId === id); if (review) go('log', { id, reviewId: review.id }); break; }
@@ -1016,6 +1044,7 @@ document.addEventListener('click', async event => {
       case 'avatar-remove': await api('/avatar', { remove: true }); toast('Profile photo removed.'); await refresh(); break;
       case 'plan': openPlan(id); break;
       case 'chats': go('chats'); break;
+      case 'review-photo-remove': { const st = ui.logs[id]; if (st) { st.photoData = null; st.removePhoto = true; render(); } break; }
       case 'thread-prompt': if (!pending) await sendChat(el.dataset.text, cur().thread); break;
       case 'thread': go('chat', { thread: id }); break;
       case 'working': case 'details': case 'invite': case 'changed': case 'change': case 'rate': go(action, { id }); break;
@@ -1085,7 +1114,7 @@ document.addEventListener('input', event => {
   if (el.id === 'friend-q' || el.id === 'people-q') render();
   if (el.id === 'catalog-q') { clearTimeout(searchTimer); searchTimer = setTimeout(async () => { const r = cur(); if (r.name !== 'catalog') return; try { r.data = await api('/catalog?q=' + encodeURIComponent(el.value)); render(); } catch (error) { toast(error.message); } }, 250); }
 });
-document.addEventListener('change', event => { if (event.target.matches('[data-slider][data-night]')) updateSlider(event.target); if (event.target.id === 'avatar-input') uploadAvatar(event.target.files[0]); });
+document.addEventListener('change', event => { if (event.target.matches('[data-slider][data-night]')) updateSlider(event.target); if (event.target.id === 'review-photo-input') pickReviewPhoto(event.target.files[0], event.target.dataset.id); if (event.target.id === 'avatar-input') uploadAvatar(event.target.files[0]); });
 // Crops to a centred square and shrinks to 256 px in the browser, so an upload is ~20 KB whatever the phone camera made.
 async function uploadAvatar(file) {
   if (!file) return;
