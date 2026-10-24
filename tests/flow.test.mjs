@@ -61,10 +61,11 @@ test('proactive planning hands only the consenting group into the existing negot
 
 test('proactive matching excludes opt-out users and non-friends', () => {
   const { store, engine } = setup(), venue = engine.quickPicks('ricky')[0].place.id;
+  const stranger = engine.state('ricky').people.find(p => p.fictional && !engine.user('ricky').friends.includes(p.id)).id;
   engine.proactiveSettings('ricky', { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
   engine.proactiveSettings('aditya', { enabled: false, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
-  engine.proactiveSettings('demo_001', { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
-  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue); engine.savePlace('demo_001', venue);
+  engine.proactiveSettings(stranger, { enabled: true, shareSavedPlaces: true, quietHours: { start: '00:00', end: '00:00' } });
+  engine.savePlace('ricky', venue); engine.savePlace('aditya', venue); engine.savePlace(stranger, venue);
   assert.equal(engine.d.opportunities.length, 0);
   store.close();
 });
