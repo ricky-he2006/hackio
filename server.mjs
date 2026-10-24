@@ -19,8 +19,20 @@ function calendar(p) {
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Disco//Friends//EN', 'BEGIN:VEVENT', `UID:${p.id}@disco.local`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`, `DTSTART;TZID=America/New_York:${date}T${time}00`, `DURATION:PT${p.option.activity ? 2 : 1}H`, `SUMMARY:${escape(p.title)}`, `LOCATION:${escape(p.option.place.name + ', ' + p.option.place.address)}`, `DESCRIPTION:${escape('Disco plan. No restaurant reservation has been made.' + (p.option.activity ? ' Second stop: ' + p.option.activity.name + '. Verify travel time before attending.' : ''))}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
 }
 
+/** Fixed-window counter per key. Expired windows are swept once the map grows, so it can't leak memory. */
+function rateLimiter(max, windowMs) {
+  const windows = new Map();
+  return key => {
+    const now = Date.now();
+    if (windows.size > 500) for (const [k, w] of windows) if (now - w.since > windowMs) windows.delete(k);
+    let w = windows.get(key); if (!w || now - w.since > windowMs) windows.set(key, w = { since: now, count: 0 });
+    return ++w.count <= max;
+  };
+}
+const MAX_STREAMS_PER_USER = 6; // the four-phone demo opens one per account; this leaves room for extra tabs
+
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {
-  const loginAttempts = new Map();
+  const loginLimit = rateLimiter(30, 60_000), factsLimit = rateLimiter(10, 60_000), streams = new Map();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' about:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
@@ -29,7 +41,8 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       if (!url.pathname.startsWith('/api/')) {
         assert(req.method === 'GET' || req.method === 'HEAD', 'Method not allowed.', 405);
         const route = url.pathname === '/' ? '/index.html' : url.pathname === '/demo' ? '/demo.html' : url.pathname;
-        const file = resolve(publicDir, '.' + decodeURIComponent(route));
+        let decoded; try { decoded = decodeURIComponent(route); } catch { throw new AppError('Not found.', 404); } // e.g. /%E0
+        const file = resolve(publicDir, '.' + decoded);
         assert(file.startsWith(publicDir + sep), 'Not found.', 404);
         try { assert((await stat(file)).isFile(), 'Not found.', 404); const data = await readFile(file); res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return; } catch { throw new AppError('Not found.', 404); }
       }
@@ -37,14 +50,14 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
       if (url.pathname === '/api/health') return json(res, 200, { ok: true, ...providerStatus() });
       if (url.pathname === '/api/accounts' && req.method === 'GET') return json(res, 200, MAIN_IDS.map(id => publicUser(store.data.users[id])));
       if (url.pathname === '/api/login' && req.method === 'POST') {
-        const key = req.socket.remoteAddress; let attempts = loginAttempts.get(key);
-        if (!attempts || Date.now() - attempts.since > 60_000) { attempts = { since: Date.now(), count: 0 }; loginAttempts.set(key, attempts); }
-        assert(++attempts.count <= 30, 'Too many login attempts. Try again in a minute.', 429);
+        assert(loginLimit(req.socket.remoteAddress), 'Too many login attempts. Try again in a minute.', 429);
         const input = await body(req); assert(typeof input.username === 'string' && typeof input.password === 'string', 'Enter your username and password.');
         const session = store.login(input.username, input.password); assert(session, 'That username or password is incorrect.', 401); return json(res, 200, session);
       }
       const token = req.headers.authorization?.replace(/^Bearer /, ''); const user = store.authenticate(token); assert(user, 'Please log in again.', 401); const id = user.id;
       if (url.pathname === '/api/events' && req.method === 'GET') {
+        assert((streams.get(id) || 0) < MAX_STREAMS_PER_USER, 'Too many open live connections. Close another tab and retry.', 429);
+        streams.set(id, (streams.get(id) || 0) + 1); res.on('close', () => { const n = streams.get(id) - 1; if (n > 0) streams.set(id, n); else streams.delete(id); });
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
         const listener = revision => res.write(`data: ${JSON.stringify({ revision })}\n\n`); store.listeners.add(listener); listener(store.data.revision);
         const heartbeat = setInterval(() => { if (!store.authenticate(token)) res.end(); else res.write(': keepalive\n\n'); }, 15000);
@@ -78,6 +91,8 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true, input.decline === true); break;
         case '/api/facts': {
           assert(store.data.places[input.placeId], 'Place not found.', 404);
+          // Each lookup can be a paid search-grounding call.
+          assert(factsLimit(id), 'Too many detail checks. Try again in a minute.', 429);
           // Date and time reach the search prompt and the shared cache key, so only real values get through.
           const date = input.date || engine.state(id).defaultDate, time = input.time || '19:00';
           assert(validDate(date) && validTime(time), 'Choose a valid date and time.');

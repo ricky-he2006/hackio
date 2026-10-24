@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, MAIN_IDS } from '../lib/data.mjs';
-import { Engine, nextSaturday, evaluatePrivate } from '../lib/engine.mjs';
+import { Engine, nextSaturday, evaluatePrivate, timeString } from '../lib/engine.mjs';
 import { createApp } from '../server.mjs';
 
 const setup = () => { const store = new Store({ path: ':memory:' }); const engine = new Engine(store, { delay: 0, search: async () => ({ status: 'unavailable', summary: 'Not connected', sources: [] }) }); return { store, engine }; };
@@ -309,4 +309,44 @@ test('match cards show only the day and part of day, never a friend\'s exact hou
   engine.settings('aditya', { start: '13:20', end: '15:40' });
   const afternoon = engine.state('ricky').matches.find(m => m.place.id === place).window;
   assert.equal(afternoon.text, 'Both free Saturday afternoon'); assert.equal(afternoon.time, '14:00'); store.close();
+});
+
+test('server hardening: bad URLs 404, detail checks and live streams are capped per user', async t => {
+  const { store, engine } = setup(); let searched = 0; engine.search = async () => { searched++; return { status: 'unavailable', sources: [], checkedAt: new Date().toISOString() }; };
+  const { server } = createApp({ store, engine }); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const streams = []; t.after(() => { for (const c of streams) c.abort(); server.closeAllConnections(); server.close(); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await fetch(base + '/%E0')).status, 404);
+  const { token } = await (await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ricky', password: 'disco2026' }) })).json();
+  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, venue = Object.keys(store.data.places)[0];
+  const statuses = []; for (let i = 0; i < 11; i++) statuses.push((await fetch(base + '/api/facts', { method: 'POST', headers, body: JSON.stringify({ placeId: venue, date: nextSaturday(), time: '19:00' }) })).status);
+  assert.deepEqual(statuses, [...Array(10).fill(200), 429]); assert.equal(searched, 10);
+  const open = async () => { const c = new AbortController(); streams.push(c); return (await fetch(base + '/api/events', { headers, signal: c.signal })).status; };
+  for (let i = 0; i < 6; i++) assert.equal(await open(), 200);
+  assert.equal(await open(), 429);
+});
+
+test('the shared venue-facts cache is bounded and evicts the oldest lookups', async () => {
+  const { store, engine } = setup(); let n = 0;
+  engine.search = async () => ({ status: 'sourced', sources: [{ title: 'Fixture', url: 'https://example.test' }], checkedAt: new Date(Date.UTC(2026, 0, 1) + n++ * 60_000).toISOString() });
+  const venue = Object.keys(store.data.places)[0];
+  for (let i = 0; i < 505; i++) await engine.facts(venue, nextSaturday(), timeString(i % 1440));
+  const keys = Object.keys(engine.d.facts); assert.equal(keys.length, 500);
+  assert.ok(!keys.includes(`${venue}:${nextSaturday()}:00:00`), 'the oldest lookup was evicted'); store.close();
+});
+
+test('a friend\'s well-rated review tagged with a diet confirms it: no counter, no web-only caveat, only for people who can see it', async () => {
+  const { store, engine } = setup(); engine.settings('daniel', { dietary: 'halal' });
+  const p = await start(engine); assert.notEqual(p.state, 'awaiting_approval', 'with no evidence a strict diet cannot be cleared');
+  const venue = p.option.place.id;
+  assert.ok(engine.check('daniel', p, p.option).codes.includes('dietary_unverified'));
+  engine.review('aditya', { placeId: venue, rating: 6, quote: 'It was okay, halal menu.', tags: ['halal'] });
+  assert.ok(engine.check('daniel', p, p.option).codes.includes('dietary_unverified'), 'a lukewarm review does not vouch');
+  engine.review('aditya', { placeId: venue, rating: 8.5, quote: 'Great halal options.', tags: ['halal'] });
+  assert.deepEqual(engine.vouchedDiets('daniel', venue), ['halal']); assert.ok(!engine.check('daniel', p, p.option).codes.includes('dietary_unverified'));
+  engine.user('daniel').friends = engine.user('daniel').friends.filter(f => f !== 'aditya');
+  assert.deepEqual(engine.vouchedDiets('daniel', venue), [], 'only reviews the person can see count');
+  engine.user('daniel').friends.push('aditya');
+  p.facts = { status: 'sourced', dietary: ['halal'] }; engine.dietCaveat('daniel', p);
+  assert.ok(!engine.user('daniel').chat.some(m => /web source said so/.test(m.text)), 'friend-vouched diets get no web-only caveat'); store.close();
 });

@@ -378,7 +378,8 @@ function placeScreen(r) {
 const safeUrl = url => { try { const u = new URL(url); return ['http:', 'https:'].includes(u.protocol) ? esc(u.href) : '#'; } catch { return '#'; } };
 
 /* 9 · Log a review */
-const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud'];
+// Diet tags on a well-rated review let friends' agents treat that diet as confirmed (Engine.vouchedDiets).
+const TAGS = ['Quiet', 'First date', 'Good for groups', 'Cheap eats', 'Great patio', 'Loud', 'Vegetarian', 'Vegan', 'Halal', 'Gluten-free'];
 function initLog(p, suggested) {
   if (ui.logs[p.id]) return;
   const mine = S.myReviews.find(r => r.placeId === p.id);

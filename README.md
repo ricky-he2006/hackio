@@ -79,7 +79,7 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 
 - **Model inputs are allow-listed.** A person’s model gets only the fields it reasons over from their own context (budget, hours, days, diet, preferences, interests, energy). Saved-memory history, raw web text, rendered search HTML, and URLs are not sent.
 - **Nothing publishes from chat without consent.** When you mention a place you liked, your agent suggests a review; you write the note and post it. Your chat message is never used as the quote.
-- **Unverified diet checks are flagged privately.** If a strict diet passed only because a web source claimed it, that person’s own agent says so. The group is not told.
+- **Strict diets need evidence.** A strict diet (e.g. “halal”, not “halal preferred”) passes when a well-rated review the person can see is tagged with it, or when a web source claims it. A web-only pass gets a private “check with the restaurant” note from that person’s own agent; the group is never told anyone’s diet.
 - **Untrusted text is kept out of instructions.** User-added items’ names never reach web search or the chat model, and listed venues enter the search prompt as a labelled data block.
 - **Shared free time is coarse.** “It’s a match” cards say “Both free Saturday evening”, never the exact overlap, which would reveal a friend’s private hours.
 - **Accepted trade-off:** because counters say *what* kind of change is needed, a host who keeps revising one plan can narrow down a friend’s rough budget band or free hours. Disco is built for trusted friend groups, so this is accepted; exact values and reasons still stay with each agent.
