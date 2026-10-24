@@ -16,7 +16,7 @@ async function body(req) {
 function calendar(p) {
   const escape = s => String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   const date = p.option.date.replaceAll('-', ''), time = p.option.time.replace(':', '');
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Disco//Friends//EN', 'BEGIN:VEVENT', `UID:${p.id}@disco.local`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`, `DTSTART;TZID=America/New_York:${date}T${time}00`, 'DURATION:PT1H', `SUMMARY:${escape(p.title)}`, `LOCATION:${escape(p.option.place.name + ', ' + p.option.place.address)}`, 'DESCRIPTION:Disco plan. No restaurant reservation has been made.', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Disco//Friends//EN', 'BEGIN:VEVENT', `UID:${p.id}@disco.local`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`, `DTSTART;TZID=America/New_York:${date}T${time}00`, `DURATION:PT${p.option.activity ? 2 : 1}H`, `SUMMARY:${escape(p.title)}`, `LOCATION:${escape(p.option.place.name + ', ' + p.option.place.address)}`, `DESCRIPTION:${escape('Disco plan. No restaurant reservation has been made.' + (p.option.activity ? ' Second stop: ' + p.option.activity.name + '. Verify travel time before attending.' : ''))}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
 }
 
 export function createApp({ store = new Store(), engine = new Engine(store) } = {}) {

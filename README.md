@@ -34,7 +34,7 @@ Copy `.env.example` to `.env` and set the provider and keys locally. Never commi
 ```dotenv
 AGENT_PROVIDER=gemini
 GEMINI_API_KEY=your-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 ENABLE_WEB_SEARCH=true
 ```
 
@@ -67,7 +67,7 @@ With no provider key, the app runs **clearly labeled local demo agents**. These 
 - Ratings and reviews from chat or a form; rankings recompute live for connected friends.
 - Restaurant catalog, item details, source links, saved “Want to try” items, activity feed, likes, friends and friend requests.
 - Additional music, movie/TV, book, and product items can be entered and reviewed. The supplied dataset is primarily venues.
-- Host-chosen groups, candidate restaurants, bounded three-round negotiation, live status, host approval, invitations, RSVP, renegotiation, change summaries, and reconfirmations.
+- Host-chosen groups, candidate restaurants, an optional second activity, bounded three-round negotiation, live status, host approval, invitations, RSVP, renegotiation, change summaries, and reconfirmations.
 - Declines, no-solution cases, stale approval, changed constraints, expired invites, and interrupted negotiation are handled explicitly.
 - Simulated booking confirmation and downloadable `.ics` event after everyone accepts. No actual restaurant booking, payment, or calendar sync occurs.
 - Four independent mobile sessions displayed together, with live updates through authenticated server-sent events.

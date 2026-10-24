@@ -165,8 +165,20 @@ function drawModal() {
     const primary = $('.modal [data-action="approve"], .modal [data-action="rsvp-in"]');
     if (primary) { const group = primary.dataset.action === 'rsvp-in' ? primary.parentElement : primary; group.classList.add('primary-shortcut'); $('.modal .route-card')?.insertAdjacentElement('afterend', group); }
     const plan = S.plans.find(p => p.id === modal.id);
+    if (plan?.myRsvp === 'reconfirm' && primary) primary.innerHTML = 'Reconfirm ' + icon('check');
+    if (plan && ['invited', 'confirmed', 'booked'].includes(plan.state) && $('.modal .diff .tiny')) $('.modal .diff .tiny').textContent = 'The host approved this update.';
     if (plan?.why?.length) $('.modal .route-card')?.insertAdjacentHTML('afterend', `<div class="plan-why"><span class="eyebrow">WHY THIS ONE</span><p>“${esc(plan.why[0].quote)}”</p><span>${esc(plan.why[0].author)}${plan.why[0].synthetic ? ' · demo opinion' : ''}</span></div>`);
+    if (plan?.option.activity) {
+      const [hour, minute] = plan.option.time.split(':').map(Number), activityTime = `${String(hour + 1).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      $('.modal .route-card')?.insertAdjacentHTML('afterend', `<div class="route-card secondary-stop"><div class="route-marker">${icon('adventures')}</div><div><span class="eyebrow">${prettyTime(activityTime)} · NEXT STOP</span><h2>${esc(plan.option.activity.name)}</h2><p>${esc(plan.option.activity.area)}</p><p class="tiny muted">One hour planned. Verify travel time and admission costs.</p></div></div>`);
+    }
+    if (plan?.previous && plan.previous.activity?.id !== plan.option.activity?.id) $('.modal .plan-heading')?.insertAdjacentHTML('afterend', `<div class="diff"><strong>Second stop changed</strong><p>${esc(plan.previous.activity?.name || 'None')} → ${esc(plan.option.activity?.name || 'None')}</p></div>`);
     if (plan?.state === 'booked') $('.modal .booking')?.insertAdjacentHTML('beforeend', button('Rate the night', 'review', 'primary wide mt', `data-id="${esc(plan.option.place.id)}"`));
+  }
+  if (['new-plan', 'tweak'].includes(modal.type)) {
+    const form = $('#plan-form') || $('#tweak-form'), current = S.plans.find(p => p.id === modal.id)?.option.activity?.id;
+    const label = document.createElement('label'); label.innerHTML = `After dinner (optional)<select name="activityId"><option value="">Keep it to dinner</option>${(S.activities || []).map(p => `<option value="${esc(p.id)}" ${p.id === current ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
+    form.insertBefore(label, form.querySelector('[type="submit"]'));
   }
   if ($('.modal-content')) $('.modal-content').scrollTop = scroll;
   for (const name of openDetails) { const detail = [...document.querySelectorAll('.modal-content details')].find(d => d.className === name); if (detail) detail.open = true; }
@@ -252,7 +264,7 @@ document.addEventListener('submit', async event => {
   try {
     if (form.id === 'login-form') await login(data.get('username'), data.get('password'));
     if (form.id === 'chat-form') { if (pending) return; await sendChat(data.get('message')); }
-    if (form.id === 'plan-form') { const result = await api('/plans', { title: data.get('title'), date: data.get('date'), time: data.get('time'), allowance: Number(data.get('allowance')), friends: data.getAll('friends'), placeId: modal.placeId, query: modal.draft?.query || 'restaurants' }); await refresh(); openModal({ type: 'plan', id: result.planId }); }
+    if (form.id === 'plan-form') { const result = await api('/plans', { title: data.get('title'), date: data.get('date'), time: data.get('time'), allowance: Number(data.get('allowance')), friends: data.getAll('friends'), placeId: modal.placeId, activityId: data.get('activityId') || undefined, query: modal.draft?.query || 'restaurants' }); await refresh(); openModal({ type: 'plan', id: result.planId }); }
     if (form.id === 'settings-form') { await api('/settings', { ...Object.fromEntries(data), budget: Number(data.get('budget')), days: data.getAll('days') }); closeModal(); await refresh(); toast('Your private preferences are saved.'); }
     if (form.id === 'review-form') { await api('/reviews', { placeId: modal.place.id, rating: Number(data.get('rating')), quote: data.get('quote'), tags: data.get('tags').split(',').map(x => x.trim()).filter(Boolean) }); closeModal(); await refresh(); toast('Opinion posted. Your circle’s rankings just updated.'); }
     if (form.id === 'item-form') { const place = await api('/items', Object.fromEntries(data)); openModal({ type: 'review', place }); }

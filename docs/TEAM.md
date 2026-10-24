@@ -52,7 +52,7 @@ All API routes are same-origin. Authenticate with `Authorization: Bearer <sessio
 
 ## Current boundaries
 
-- Restaurants/cafés are the working planning focus. Other categories can be entered/reviewed/recommended but do not form multi-stop routes yet.
+- Restaurants/cafés are the planning focus, with an optional second local activity. The route reserves one hour per stop; travel times require verification. Other categories can be entered/reviewed/recommended.
 - Availability is recurring day-of-week plus one daily window; not a full imported calendar.
 - Website lookup is Gemini search grounding, not unrestricted browser automation.
 - Only the four prepared users have active login/negotiation sessions. The 32 additional people contribute seeded opinions; requests to them do not auto-accept.

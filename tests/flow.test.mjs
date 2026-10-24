@@ -98,6 +98,30 @@ test('invalid revisions are atomic, known prices are enforced, and media stays i
   const recs = engine.recommend('ricky', 'music'); assert.equal(recs.length, 1); assert.equal(recs[0].place.id, item.id); store.close();
 });
 
+test('two-stop routes respect the full duration, total known cost, and separate fact caches', async () => {
+  const { store, engine } = setup();
+  engine.search = async place => ({ status: 'sourced', checkedAt: new Date().toISOString(), sources: [{ title: 'Test fixture', url: 'https://example.test' }], price: place.id === 'CBUS005' ? 0 : 12, dietary: [], open: true });
+  const { planId } = engine.createPlan('ricky', { friends: ['aditya', 'arnav', 'daniel'], date: nextSaturday(), time: '19:00', allowance: 24, activityId: 'CBUS005' });
+  await engine.jobs.get(planId); const p = engine.d.plans.find(p => p.id === planId);
+  assert.equal(p.state, 'awaiting_approval'); assert.equal(p.option.activity.id, 'CBUS005');
+  assert.equal(engine.d.facts[`${p.option.place.id}:${p.option.date}:${p.option.time}`].activity, undefined);
+  const context = { ...engine.user('arnav').private, end: '21:30' };
+  assert.ok(evaluatePrivate(context, p.option, p.facts).codes.includes('schedule'));
+  assert.ok(evaluatePrivate(engine.user('arnav').private, p.option, { price: 12, activity: { price: 10 } }).codes.includes('budget'));
+  store.close();
+});
+
+test('model-backed evaluators receive one private context and cannot leak prose into the channel', async () => {
+  const prior = { provider: process.env.AGENT_PROVIDER, key: process.env.GEMINI_API_KEY }; process.env.AGENT_PROVIDER = 'gemini'; process.env.GEMINI_API_KEY = 'test-only-placeholder';
+  const { store, engine } = setup(); const contexts = [];
+  engine.model = async (_system, input) => { contexts.push(input); return { type: 'accept', reason: 'PRIVATE_MODEL_PROSE_SENTINEL', privateBudget: 999 }; };
+  try {
+    const p = await start(engine); assert.equal(p.state, 'awaiting_approval'); assert.ok(contexts.length >= 4);
+    assert.ok(contexts.every(x => x.privateContext && !x.users && !x.otherUsers));
+    assert.ok(!JSON.stringify(engine.state('ricky')).includes('PRIVATE_MODEL_PROSE_SENTINEL'));
+  } finally { if (prior.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = prior.provider; if (prior.key === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prior.key; store.close(); }
+});
+
 test('HTTP auth boundary, private files, origin checks, independent sessions, and calendar gate', async t => {
   const { store, engine } = setup(); const { server } = createApp({ store, engine }); await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); server.close(); store.close(); });
