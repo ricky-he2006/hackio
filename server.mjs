@@ -4,7 +4,7 @@ import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, MAIN_IDS, publicUser } from './lib/data.mjs';
 import { Engine, AppError, assert, clean } from './lib/engine.mjs';
-import { providerStatus } from './lib/providers.mjs';
+import { providerStatus, checkProvider } from './lib/providers.mjs';
 
 const publicDir = resolve('public');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
@@ -95,5 +95,10 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { server } = createApp(); const port = Number(process.env.PORT || 3000); const host = process.env.HOST || '127.0.0.1';
-  server.listen(port, host, () => console.log(`Disco is ready: http://${host}:${port}\nFour-user demo: http://${host}:${port}/demo\nAgent mode: ${providerStatus().provider}`));
+  server.listen(port, host, async () => {
+    console.log(`Disco is ready: http://${host}:${port}\nFour-user demo: http://${host}:${port}/demo\nAgent mode: ${providerStatus().provider}`);
+    const check = await checkProvider();
+    if (check.ok === false) console.warn(`Agent mode: ${check.provider} is FAILING (${check.error}). Agents will use local rules until calls succeed.`);
+    else if (check.ok) console.log(`Agent mode: ${check.provider} verified with ${providerStatus().model}`);
+  });
 }
