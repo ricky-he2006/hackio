@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, MAIN_IDS, publicUser } from './lib/data.mjs';
-import { Engine, AppError, assert, clean } from './lib/engine.mjs';
+import { Engine, AppError, assert, clean, validDate, validTime } from './lib/engine.mjs';
 import { providerStatus, checkProvider } from './lib/providers.mjs';
 
 const publicDir = resolve('public');
@@ -76,7 +76,13 @@ export function createApp({ store = new Store(), engine = new Engine(store) } = 
         case '/api/comment': result = engine.comment(id, input.reviewId, input.text); break;
         case '/api/matches/dismiss': result = engine.dismissMatch(id, clean(input.placeId, 80)); break;
         case '/api/friends': result = engine.friendRequest(id, input.userId, input.accept === true, input.decline === true); break;
-        case '/api/facts': assert(store.data.places[input.placeId], 'Place not found.', 404); result = await engine.facts(input.placeId, clean(input.date || engine.state(id).defaultDate, 10), clean(input.time || '19:00', 5)); break;
+        case '/api/facts': {
+          assert(store.data.places[input.placeId], 'Place not found.', 404);
+          // Date and time reach the search prompt and the shared cache key, so only real values get through.
+          const date = input.date || engine.state(id).defaultDate, time = input.time || '19:00';
+          assert(validDate(date) && validTime(time), 'Choose a valid date and time.');
+          result = await engine.facts(input.placeId, date, time); break;
+        }
         case '/api/plans': result = engine.createPlan(id, input); break;
         case '/api/plans/approve': result = engine.approve(id, input.planId, input.revision); break;
         case '/api/plans/rsvp': result = engine.rsvp(id, input.planId, input.response); break;
