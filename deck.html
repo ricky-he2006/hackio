@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disco Deck</title>
+<style>
+@font-face{font-family:'Bricolage Grotesque';font-weight:200 800;src:url(public/fonts/bricolage-grotesque.woff2) format('woff2')}
+@font-face{font-family:'Hanken Grotesk';font-weight:100 900;src:url(public/fonts/hanken-grotesk.woff2) format('woff2')}
+@font-face{font-family:'Caveat';font-weight:400 700;src:url(public/fonts/caveat.woff2) format('woff2')}
+:root{
+  --ink:#1D1A2F;--muted:#5E5873;--muted-2:#4A4558;--paper:#FFFDF7;--white:#FFFFFF;
+  --purple:#B79CFF;--lav-1:#F1EBFF;--lav-2:#E3D7FF;--lav-3:#D9C8FF;--lav-4:#C9B6FF;
+  --green:#79D18A;--green-ink:#1F7A50;--yellow:#FFD666;--coral:#FF6F59;--coral-tint:#FFE0D6;--gray:#E4E1DA;
+  --pink:#F6A8CC;--blue:#9CC8FF;--orange:#FFB86B;--sky:#DDEFFC;--cream:#FFF0C2;
+  --display:'Bricolage Grotesque',system-ui,sans-serif;--body:'Hanken Grotesk',system-ui,sans-serif;--hand:'Caveat',cursive;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#DCD3EC;overflow:hidden}
+body{font-family:var(--body);color:var(--ink);-webkit-font-smoothing:antialiased}
+/* Every slide is a fixed 1920×1080 page, scaled to fit the window. Hidden slides keep their layout so the diagram can measure itself. */
+#deck{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center}
+.slide{position:absolute;inset:0;width:1920px;height:1080px;overflow:hidden;background:var(--white);visibility:hidden;opacity:0;transition:opacity .25s ease}
+.slide.on{visibility:visible;opacity:1}
+#nav{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:var(--paper);border:2px solid var(--ink);border-radius:999px;padding:6px 8px;box-shadow:3px 3px 0 var(--ink);font:700 15px/1 var(--body);z-index:10;transition:opacity .3s}
+#nav button{width:38px;height:38px;border-radius:999px;border:2px solid var(--ink);background:var(--purple);font:800 18px/1 var(--body);color:var(--ink);cursor:pointer}
+#nav button:disabled{background:var(--gray);opacity:.6;cursor:default}
+#nav .count{min-width:56px;text-align:center}
+body.idle #nav{opacity:0}
+@media print{#nav{display:none}}
+
+.s-proc{width:1920px;height:1080px;overflow:hidden;font-family:var(--body);color:var(--ink);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+.s-proc header{height:92px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid var(--ink);background:var(--white)}
+.s-proc .brand{display:flex;align-items:baseline;gap:18px}
+.s-proc .wordmark{font-family:var(--display);font-weight:800;font-size:56px;line-height:1;letter-spacing:-.02em}
+.s-proc .tagline{font-weight:600;font-size:18px;color:var(--muted)}
+.s-proc .headline{font-family:var(--display);font-weight:800;font-size:28px;letter-spacing:-.01em}
+.s-proc .avs{display:flex}
+.s-proc .av{width:46px;height:46px;border-radius:999px;border:2px solid var(--ink);display:grid;place-items:center;font-weight:800;font-size:17px;margin-left:-10px;background:var(--bg)}
+.s-proc .avs .av:first-child{margin-left:0}
+.s-proc main{flex:1;min-height:0;display:grid;grid-template-columns:560px 1fr;grid-template-rows:404px 1fr;gap:22px 26px;padding:22px 30px;background:var(--lav-1)}
+.s-proc .card{position:relative;background:var(--paper);border:2px solid var(--ink);border-radius:18px;box-shadow:5px 5px 0 var(--ink);padding:16px 20px}
+.s-proc .h{font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.01em;line-height:28px}
+.s-proc .sub{font-size:13.5px;color:var(--muted);font-weight:600;margin-top:2px}
+.s-proc .sticker{position:absolute;z-index:3;transform:rotate(var(--tilt,4deg));background:var(--c,var(--coral));border:2px solid var(--ink);border-radius:999px;padding:2px 10px;font-size:12px;line-height:16px;font-weight:800;letter-spacing:.03em;white-space:nowrap;box-shadow:2px 2px 0 var(--ink)}
+.s-proc .hand{font-family:var(--hand);font-weight:700}
+.s-proc .why .problem{font-family:var(--display);font-weight:700;font-size:21px;line-height:27px;margin-top:10px}
+.s-proc .why .problem em{font-style:normal;background:var(--yellow);border:2px solid var(--ink);border-radius:8px;padding:0 5px}
+.s-proc .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px}
+.s-proc .stat{border:2px solid var(--ink);border-radius:14px;background:var(--bg);padding:9px 10px;box-shadow:3px 3px 0 var(--ink)}
+.s-proc .stat b{display:block;font-family:var(--display);font-weight:800;font-size:30px;line-height:32px}
+.s-proc .stat span{display:block;font-size:12px;line-height:15px;font-weight:600;margin-top:3px}
+.s-proc .stat i{display:block;font-style:normal;font-size:10.5px;color:var(--muted-2);margin-top:5px;line-height:13px}
+.s-proc .why .answer{margin-top:14px;font-size:14.5px;line-height:20px;font-weight:600}
+.s-proc .why .answer b{font-weight:800}
+.s-proc .matrix table{width:100%;border-collapse:separate;border-spacing:0 5px;margin-top:8px}
+.s-proc .matrix th{font-size:12px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;text-align:center;padding:0 6px 2px;color:var(--muted-2);line-height:15px}
+.s-proc .matrix th:first-child{text-align:left}
+.s-proc .matrix td{background:var(--white);border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);padding:5px 8px;font-size:13px;line-height:16px;text-align:center;vertical-align:middle}
+.s-proc .matrix td:first-child{border-left:2px solid var(--ink);border-radius:12px 0 0 12px;text-align:left;width:220px}
+.s-proc .matrix td:last-child{border-right:2px solid var(--ink);border-radius:0 12px 12px 0;text-align:left;color:var(--muted-2);width:330px}
+.s-proc .matrix td.name b{display:block;font-family:var(--display);font-weight:700;font-size:15px;line-height:18px}
+.s-proc .matrix td.name span{font-size:11.5px;color:var(--muted)}
+.s-proc .matrix tr.us td{background:var(--purple);box-shadow:0 3px 0 var(--ink)}
+.s-proc .matrix tr.us td:last-child{color:var(--ink);font-weight:700}
+.s-proc .mk{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:999px;border:2px solid var(--ink);font-weight:800;font-size:13px}
+.s-proc .mk.y{background:var(--green)}
+.s-proc .mk.n{background:var(--gray);border-color:var(--muted-2);color:var(--muted-2)}
+.s-proc .mk.p{background:var(--yellow)}
+.s-proc .build{grid-column:1 / -1;display:flex;flex-direction:column}
+.s-proc .build-head{display:flex;justify-content:space-between;align-items:flex-end}
+.s-proc .facts{display:flex;gap:8px}
+.s-proc .pill{height:30px;padding:0 12px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font-size:13px;font-weight:700;display:inline-flex;align-items:center;white-space:nowrap}
+.s-proc .pill.c{background:var(--cream)}
+.s-proc .line{position:relative;height:118px;margin:12px 4px 0}
+.s-proc .line::before{content:'';position:absolute;left:0;right:0;top:44px;height:6px;border-radius:999px;background:var(--ink)}
+.s-proc .ms{position:absolute;top:0;width:150px;transform:translateX(-50%);text-align:center}
+.s-proc .ms .t{font-size:12px;font-weight:800;color:var(--muted-2);height:20px}
+.s-proc .ms .dot{width:26px;height:26px;margin:4px auto 0;border-radius:999px;border:2px solid var(--ink);background:var(--bg,var(--purple));box-shadow:2px 2px 0 var(--ink)}
+.s-proc .ms .l{margin-top:8px;font-size:12.5px;line-height:15px;font-weight:700}
+.s-proc .pivots-h{display:flex;align-items:baseline;gap:12px;margin-top:4px}
+.s-proc .pivots-h .hand{font-size:24px;color:var(--muted-2)}
+.s-proc .pivots{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:10px;flex:1;min-height:0}
+.s-proc .pv{position:relative;border:2px solid var(--ink);border-radius:14px;background:var(--white);box-shadow:3px 3px 0 var(--ink);padding:12px 12px 11px;display:flex;flex-direction:column}
+.s-proc .pv .broke{font-family:var(--display);font-weight:700;font-size:16px;line-height:19px}
+.s-proc .pv .why{font-size:12px;line-height:15px;color:var(--muted-2);margin-top:4px}
+.s-proc .pv .arrow{font-weight:800;font-size:13px;margin:7px 0 3px;color:var(--orange-ink,#9A4A12)}
+.s-proc .pv .fix{font-size:12.5px;line-height:16px;font-weight:600}
+.s-proc .pv .win{margin-top:auto;padding-top:8px}
+.s-proc .pv .win span{display:inline-block;background:var(--green);border:2px solid var(--ink);border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:800;line-height:15px}
+.s-proc footer{height:54px;flex-shrink:0;border-top:2px solid var(--ink);background:var(--paper);display:flex;align-items:center;justify-content:space-between;padding:0 36px;gap:30px}
+.s-proc footer .hand{font-size:27px;white-space:nowrap}
+.s-proc footer .fine{font-size:11px;color:var(--muted);text-align:right;line-height:14px}
+.s-arch{width:1920px;height:1080px;overflow:hidden;font-family:var(--body);color:var(--ink);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+.s-arch header{height:92px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid var(--ink);background:var(--white)}
+.s-arch .brand{display:flex;align-items:baseline;gap:18px}
+.s-arch .wordmark{font-family:var(--display);font-weight:800;font-size:56px;line-height:1;letter-spacing:-.02em}
+.s-arch .tagline{font-weight:600;font-size:18px;color:var(--muted)}
+.s-arch .headline{font-family:var(--display);font-weight:800;font-size:28px;letter-spacing:-.01em;display:flex;align-items:center;gap:14px}
+.s-arch .crew{display:flex;align-items:center;gap:16px}
+.s-arch .headline-wrap{text-align:center}
+.s-arch .headline-wrap .headline{justify-content:center}
+.s-arch .purpose{margin-top:4px;font-size:15px;font-weight:600;color:var(--muted)}
+.s-arch .avs{display:flex}
+.s-arch .av{width:46px;height:46px;border-radius:999px;border:2px solid var(--ink);display:grid;place-items:center;font-weight:800;font-size:17px;margin-left:-10px;background:var(--bg)}
+.s-arch .avs .av:first-child{margin-left:0}
+.s-arch .icon-circle{width:46px;height:46px;border-radius:999px;border:2px solid var(--ink);background:var(--paper);display:grid;place-items:center}
+.s-arch main{flex:1;min-height:0;display:flex;gap:26px;padding:22px 30px 22px 30px;background:var(--lav-1)}
+.s-arch .card{position:relative;background:var(--paper);border:2px solid var(--ink);border-radius:18px}
+.s-arch .sh-3{box-shadow:3px 3px 0 var(--ink)}
+.s-arch .sh-5{box-shadow:5px 5px 0 var(--ink)}
+.s-arch .stage{flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 20px 14px}
+.s-arch .stage-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.s-arch .h{font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.01em}
+.s-arch .legend{display:flex;gap:8px}
+.s-arch .pill{height:28px;padding:0 11px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.s-arch .pill i{width:12px;height:12px;border-radius:999px;border:2px solid var(--ink);background:var(--c)}
+.s-arch .pill.dash{border-style:dashed;color:var(--muted-2)}
+.s-arch #diagram{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center}
+.s-arch #diagram svg{max-width:100%;max-height:100%;height:auto;overflow:visible}
+.s-arch .life{flex-shrink:0;border-top:2px dashed var(--lav-4);padding-top:12px;margin-top:6px;display:flex;align-items:center;gap:10px}
+.s-arch .life .label{font-family:var(--display);font-weight:800;font-size:18px;margin-right:4px;white-space:nowrap}
+.s-arch .state{height:34px;padding:0 13px;border:2px solid var(--ink);border-radius:999px;font-weight:700;font-size:14px;display:inline-flex;align-items:center;background:var(--c);box-shadow:2px 2px 0 var(--ink);white-space:nowrap}
+.s-arch .arr{font-weight:800;color:var(--ink);font-size:16px}
+.s-arch .life .note{font-family:var(--hand);font-weight:700;font-size:22px;line-height:1.05;color:var(--muted-2);margin-left:6px}
+.s-arch aside{width:452px;flex-shrink:0;display:flex;flex-direction:column;padding:16px 18px 14px}
+.s-arch aside .h{margin-bottom:2px}
+.s-arch aside .sub{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:8px}
+.s-arch .group{margin-top:auto}
+.s-arch .ghead{display:inline-block;padding:2px 10px;border:2px solid var(--ink);border-radius:999px;background:var(--cream);font-weight:800;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+.s-arch .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px 10px}
+.s-arch .tile{display:flex;align-items:center;gap:10px;min-width:0}
+.s-arch .ic{width:46px;height:46px;flex-shrink:0;border-radius:13px;border:2px solid var(--ink);background:var(--white);display:flex;align-items:center;justify-content:center;box-shadow:3px 3px 0 var(--ink)}
+.s-arch .ic svg{display:block;width:28px;height:28px}
+.s-arch .tile b{display:block;font-size:14px;line-height:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-arch .tile div span{display:block;font-size:11.5px;line-height:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-arch .promise{position:absolute;z-index:2;border:2px solid var(--ink);border-radius:16px;background:var(--paper);padding:10px 11px 11px;box-shadow:4px 4px 0 var(--ink)}
+.s-arch .promise h3{font-family:var(--display);font-weight:800;font-size:16px;line-height:19px}
+.s-arch .promise p{display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:15px;font-weight:600;margin-top:7px}
+.s-arch .promise .ic.sm{width:18px;height:18px;border-radius:999px;border-width:1.5px;font-size:10px;font-weight:800;box-shadow:none;background:var(--purple)}
+.s-arch footer{height:54px;flex-shrink:0;border-top:2px solid var(--ink);background:var(--paper);display:flex;align-items:center;justify-content:space-between;padding:0 36px}
+.s-arch footer .hand{font-family:var(--hand);font-weight:700;font-size:27px}
+.s-arch footer .fine{font-size:12px;color:var(--muted);max-width:920px;text-align:right;line-height:15px}
+.s-arch .sticker{position:absolute;z-index:3;transform:rotate(var(--tilt,4deg));background:var(--c,var(--coral));border:2px solid var(--ink);border-radius:999px;padding:2px 9px;font-size:11px;line-height:15px;font-weight:800;letter-spacing:.03em;white-space:nowrap;box-shadow:2px 2px 0 var(--ink)}
+.s-arch .callout{position:absolute;z-index:3;font-family:var(--hand);font-weight:700;font-size:23px;line-height:1;color:var(--ink);white-space:nowrap;transform:rotate(var(--tilt,-3deg))}
+.s-arch .canvas{position:relative;width:1340px;height:740px}
+.s-arch .zone{position:absolute;z-index:0;border:2px solid var(--ink);border-radius:18px;background:var(--lav-1)}
+.s-arch .zone>h3{position:absolute;top:9px;left:14px;font-family:var(--display);font-weight:800;font-size:17px;letter-spacing:-.01em}
+.s-arch .zone.engine{background:var(--lav-2)}
+.s-arch .zone.privacy{border-style:dashed;background:var(--lav-3)}
+.s-arch .zone.privacy>h3{font-size:15px}
+.s-arch #wires{position:absolute;inset:0;z-index:1;overflow:visible;pointer-events:none}
+.s-arch #wires path{fill:none;stroke:var(--ink);stroke-width:2.25;stroke-linecap:round}
+.s-arch #wires path.dash{stroke-dasharray:7 6;stroke:var(--muted-2)}
+.s-arch .n{position:absolute;z-index:2;border:2px solid var(--ink);border-radius:14px;background:var(--paper);padding:9px 12px 10px;box-shadow:3px 3px 0 var(--ink)}
+.s-arch .n b{display:block;font-family:var(--display);font-weight:700;font-size:16.5px;line-height:20px;letter-spacing:-.005em}
+.s-arch .n span{display:block;margin-top:2px;font-size:13px;line-height:16px;font-weight:500;color:var(--muted-2)}
+.s-arch .n.user{background:var(--yellow)}
+.s-arch .n.fe{background:var(--sky)}
+.s-arch .n.secure{background:var(--coral-tint)}
+.s-arch .n.agent{background:var(--purple);box-shadow:4px 4px 0 var(--ink)}
+.s-arch .n.rules{background:var(--green)}
+.s-arch .n.provider{background:var(--orange)}
+.s-arch .n.store{background:var(--pink)}
+.s-arch .n.fallback{background:var(--gray);border-style:dashed;border-color:var(--muted-2);box-shadow:none}
+.s-arch .n.fallback b,.s-arch .n.fallback span{color:var(--muted-2)}
+.s-arch .n .mini{display:flex;margin-top:7px}
+.s-arch .n .mini i{width:24px;height:24px;border-radius:999px;border:2px solid var(--ink);margin-left:-6px;background:var(--bg);font-style:normal;font-size:11px;font-weight:800;display:grid;place-items:center}
+.s-arch .n .mini i:first-child{margin-left:0}
+.s-arch .n.stack::before,.s-arch .n.stack::after{content:'';position:absolute;inset:-2px;border:2px solid var(--ink);border-radius:14px;background:var(--lav-4);z-index:-1}
+.s-arch .n.stack::before{transform:rotate(-5deg) translate(-6px,4px)}
+.s-arch .n.stack::after{transform:rotate(4deg) translate(8px,3px);background:var(--purple)}
+.s-arch .wl{position:absolute;z-index:3;transform:translate(-50%,-50%);background:var(--paper);border:1.5px solid var(--ink);border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700;white-space:nowrap}
+.s-arch .wl.dash{border-style:dashed;border-color:var(--muted-2);color:var(--muted-2)}
+.s-arch .step{position:absolute;z-index:4;width:28px;height:28px;border-radius:999px;border:2px solid var(--ink);background:var(--coral);font-family:var(--display);font-weight:800;font-size:15px;display:grid;place-items:center;box-shadow:2px 2px 0 var(--ink)}
+.s-arch .steps{position:absolute;z-index:2;border:2px solid var(--ink);border-radius:16px;background:var(--paper);padding:13px 14px;box-shadow:4px 4px 0 var(--ink)}
+.s-arch .steps h3{font-family:var(--display);font-weight:800;font-size:19px;margin-bottom:8px}
+.s-arch .steps li{list-style:none;display:flex;gap:9px;align-items:flex-start;font-size:13.5px;line-height:17px;font-weight:600;margin-top:8px}
+.s-arch .steps li .step{position:static;flex-shrink:0;width:24px;height:24px;font-size:13px;box-shadow:none}
+
+/* New slides reuse the process slide's header/footer/card look (they also carry .s-proc). */
+.s-gen main{display:grid;grid-template-columns:none;grid-template-rows:none}
+.s-gen .pad{padding:18px 22px}
+.s-gen .mk{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:999px;border:2px solid var(--ink);font-weight:800;font-size:13px;flex-shrink:0}
+.s-gen .mk.y{background:var(--green)}.s-gen .mk.n{background:var(--coral)}
+.s-gen .sticker.static{position:static;display:inline-block}
+.s-gen code{font-family:ui-monospace,Consolas,monospace;font-size:.92em;background:var(--lav-1);border:1.5px solid var(--ink);border-radius:6px;padding:0 4px}
+
+/* Title + closing */
+.s-gen .title-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--lav-1);gap:34px}
+.s-gen .title-card{position:relative;width:1240px;background:var(--paper);border:3px solid var(--ink);border-radius:28px;box-shadow:10px 10px 0 var(--ink);padding:54px 70px 50px;text-align:center}
+.s-gen .big-word{font-family:var(--display);font-weight:800;font-size:200px;line-height:.9;letter-spacing:-.04em}
+.s-gen .big-word.sm{font-size:120px}
+.s-gen .big-tag{font-family:var(--hand);font-weight:700;font-size:52px;margin-top:6px}
+.s-gen .pitch{font-size:24px;line-height:34px;font-weight:600;color:var(--muted-2);margin:22px auto 0;max-width:1000px}
+.s-gen .pitch b{color:var(--ink);background:var(--purple);border:2px solid var(--ink);border-radius:8px;padding:0 6px}
+.s-gen .chips{display:flex;justify-content:center;gap:14px;margin-top:28px}
+.s-gen .chip{height:44px;padding:0 20px;border:2px solid var(--ink);border-radius:999px;background:var(--c);font-weight:800;font-size:18px;display:inline-flex;align-items:center;box-shadow:3px 3px 0 var(--ink)}
+.s-gen .team{display:flex;gap:34px}
+.s-gen .member{display:flex;align-items:center;gap:12px;font-family:var(--display);font-weight:700;font-size:24px}
+.s-gen .av.lg{width:56px;height:56px;font-size:22px;margin:0}
+.s-gen .hint{font-size:26px;color:var(--muted)}
+.s-gen .thanks{font-size:64px;line-height:1}
+.s-gen .demo-path{display:flex;justify-content:center;align-items:center;gap:18px;margin-top:22px}
+.s-gen .url{font-family:ui-monospace,Consolas,monospace;font-size:30px;font-weight:700;background:var(--ink);color:var(--paper);border-radius:14px;padding:10px 22px}
+.s-gen .farrow{font-family:var(--display);font-weight:800;font-size:30px}
+.s-gen .takeaways{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:34px;text-align:left}
+.s-gen .tk{border:2px solid var(--ink);border-radius:18px;background:var(--c);padding:18px 20px;box-shadow:4px 4px 0 var(--ink)}
+.s-gen .tk b{display:block;font-family:var(--display);font-weight:800;font-size:24px;line-height:28px}
+.s-gen .tk span{display:block;font-size:17px;line-height:23px;font-weight:600;margin-top:6px}
+
+/* Questions */
+.s-gen main.qs{grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr auto;gap:20px 22px}
+.s-gen .q{position:relative;background:var(--paper);border:2px solid var(--ink);border-radius:18px;box-shadow:5px 5px 0 var(--ink);padding:16px 20px;border-top:12px solid var(--c);display:flex;flex-direction:column;gap:10px}
+.s-gen .qq{font-family:var(--display);font-weight:800;font-size:23px;line-height:28px}
+.s-gen .qq em{font-style:normal;background:var(--yellow);border-radius:6px;padding:0 4px}
+.s-gen .qrow{font-size:16px;line-height:22px;font-weight:600;color:var(--muted-2)}
+.s-gen .tag{display:inline-block;margin-right:8px;padding:0 9px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font-size:12px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--ink);line-height:20px}
+.s-gen .tag.built{background:var(--green)}
+.s-gen .clever{grid-column:1 / -1;display:flex;align-items:center;gap:36px;background:var(--purple);border:2px solid var(--ink);border-radius:18px;box-shadow:5px 5px 0 var(--ink);padding:18px 26px}
+.s-gen .clever-text{width:560px;flex-shrink:0}
+.s-gen .clever-text h3{font-family:var(--display);font-weight:800;font-size:28px;line-height:32px;margin-top:8px}
+.s-gen .clever-text p{font-size:16px;line-height:22px;font-weight:600;margin-top:6px}
+.s-gen .flow{flex:1;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.s-gen .fstep{display:flex;flex-direction:column;align-items:center;gap:8px}
+.s-gen .fl{font-size:13px;font-weight:800;letter-spacing:.03em;text-transform:uppercase}
+.s-gen .bubble{background:var(--paper);border:2px solid var(--ink);border-radius:14px;padding:8px 14px;font-weight:700;font-size:17px;box-shadow:3px 3px 0 var(--ink);white-space:nowrap}
+.s-gen .votes{display:flex;gap:6px}
+.s-gen .votes .mk{width:34px;height:34px;font-size:17px;box-shadow:2px 2px 0 var(--ink)}
+
+/* Breadth */
+.s-gen main.br{grid-template-columns:1fr 1fr;gap:26px}
+.s-gen .areas{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
+.s-gen .area{display:flex;align-items:center;gap:14px}
+.s-gen .aic{width:52px;height:52px;flex-shrink:0;border-radius:14px;border:2px solid var(--ink);background:var(--c);display:grid;place-items:center;font-size:25px;box-shadow:3px 3px 0 var(--ink)}
+.s-gen .area b{display:block;font-family:var(--display);font-weight:700;font-size:20px;line-height:24px}
+.s-gen .area span{display:block;font-size:15px;line-height:20px;color:var(--muted-2);font-weight:500}
+.s-gen .hardest{margin-top:18px;border:2px dashed var(--ink);border-radius:14px;background:var(--lav-3);padding:12px 16px;font-size:16px;line-height:22px;font-weight:600}
+.s-gen .hardest .hand{font-size:26px;margin-right:4px}
+.s-gen table.scale{width:100%;border-collapse:separate;border-spacing:0 8px;margin-top:10px}
+.s-gen .scale th{text-align:left;font-size:13px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted-2);padding:0 14px}
+.s-gen .scale td{border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);padding:10px 14px;font-size:16px;line-height:21px;font-weight:600;background:var(--white);width:50%}
+.s-gen .scale td:first-child{border-left:2px solid var(--ink);border-radius:12px 0 0 12px;color:var(--muted-2);background:var(--gray)}
+.s-gen .scale td:last-child{border-right:2px solid var(--ink);border-radius:0 12px 12px 0;background:var(--green)}
+.s-gen .bonus{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:17px;font-weight:600}
+
+/* Impact */
+.s-gen main.im{grid-template-columns:1.15fr 1fr 1fr;gap:26px}
+.s-gen .lede{font-size:17px;line-height:24px;font-weight:600;color:var(--muted-2);margin-top:8px}
+.s-gen .mini-h{font-family:var(--display);font-weight:800;font-size:19px;margin-top:20px}
+.s-gen .needs li{list-style:none;display:flex;align-items:flex-start;gap:10px;font-size:16.5px;line-height:22px;font-weight:700;margin-top:12px}
+.s-gen .needs i{display:block;font-style:normal;font-weight:500;color:var(--muted-2);font-size:15px}
+.s-gen .needs li>span+*{display:block}
+.s-gen .vals{display:flex;flex-direction:column;gap:16px;margin-top:14px}
+.s-gen .val{border:2px solid var(--ink);border-radius:16px;background:var(--c);padding:16px 18px;box-shadow:4px 4px 0 var(--ink)}
+.s-gen .val b{display:block;font-family:var(--display);font-weight:800;font-size:23px}
+.s-gen .val span{display:block;font-size:16.5px;line-height:23px;font-weight:600;margin-top:4px}
+.s-gen .feas li{list-style:none;font-size:16.5px;line-height:23px;font-weight:500;margin-top:12px;padding-left:18px;position:relative}
+.s-gen .feas li::before{content:'';position:absolute;left:0;top:8px;width:9px;height:9px;border-radius:999px;background:var(--coral);border:2px solid var(--ink)}
+.s-gen .feas b{font-weight:800}
+.s-gen .next li{list-style:none;display:flex;align-items:center;gap:12px;font-size:16.5px;font-weight:700;margin-top:12px}
+.s-gen .next li span{width:30px;height:30px;flex-shrink:0;border-radius:999px;border:2px solid var(--ink);background:var(--yellow);display:grid;place-items:center;font-family:var(--display);font-weight:800;box-shadow:2px 2px 0 var(--ink)}
+
+/* Presentation sizing: these slides are read from across a room. */
+.s-gen .h{font-size:32px;line-height:38px}
+.s-gen .sticker{font-size:14px;line-height:18px;padding:3px 12px}
+.s-gen .q{padding:26px 28px;gap:16px}
+.s-gen .qq{font-size:31px;line-height:37px}
+.s-gen .qrow{font-size:21px;line-height:30px}
+.s-gen .tag{font-size:14px;line-height:24px;padding:0 11px}
+.s-gen .clever-text h3{font-size:32px;line-height:36px}
+.s-gen .clever-text p{font-size:18px;line-height:25px}
+.s-gen .bubble{font-size:20px}
+.s-gen .fl{font-size:14px}
+.s-gen .br .card,.s-gen .im .card{display:flex;flex-direction:column;padding:26px 30px}
+.s-gen .areas{gap:20px;margin-top:22px}
+.s-gen .aic{width:64px;height:64px;border-radius:16px}
+.s-gen .aic svg{width:32px;height:32px}
+.s-gen .area b{font-size:26px;line-height:31px}
+.s-gen .area span{font-size:18.5px;line-height:25px}
+.s-gen .hardest{margin-top:auto;font-size:20px;line-height:28px;padding:16px 20px}
+.s-gen .hardest .hand{font-size:32px}
+.s-gen table.scale{border-spacing:0 12px;margin-top:16px}
+.s-gen .scale th{font-size:15px}
+.s-gen .scale td{font-size:20px;line-height:27px;padding:16px 18px}
+.s-gen .bonus{margin-top:auto;font-size:21px;line-height:29px}
+.s-gen .bonus .mk{width:32px;height:32px;font-size:16px}
+.s-gen .lede{font-size:21px;line-height:30px;margin-top:12px}
+.s-gen .mini-h{font-size:26px;margin-top:30px}
+.s-gen .needs li{font-size:22px;line-height:29px;margin-top:20px;gap:14px}
+.s-gen .needs .mk{width:30px;height:30px;font-size:15px}
+.s-gen .needs i{font-size:18.5px;line-height:25px}
+.s-gen .vals{gap:24px;margin-top:22px;flex:1}
+.s-gen .val{flex:1;display:flex;flex-direction:column;justify-content:center;padding:22px 24px}
+.s-gen .val b{font-size:32px}
+.s-gen .val span{font-size:21px;line-height:30px;margin-top:8px}
+.s-gen .feas li{font-size:21.5px;line-height:30px;margin-top:20px;padding-left:24px}
+.s-gen .feas li::before{top:10px;width:12px;height:12px}
+.s-gen .next li{font-size:22px;margin-top:18px;gap:14px}
+.s-gen .mini-h.push{margin-top:auto}
+.s-gen .needs li>div{display:block}
+.s-gen .needs li i{display:block;margin-top:2px}
+.s-gen .moment{margin-top:auto;border:2px dashed var(--ink);border-radius:16px;background:var(--cream);padding:16px 20px}
+.s-gen .moment .ml{display:block;font-size:14px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted-2)}
+.s-gen .moment .mq{display:block;font-family:var(--hand);font-weight:700;font-size:46px;line-height:50px;margin-top:4px}
+.s-gen .moment .mcap{display:block;font-size:18px;line-height:25px;font-weight:600;color:var(--muted-2)}
+.s-gen .next li span{width:38px;height:38px;font-size:18px}
+
+</style>
+</head>
+<body>
+<div id="deck">
+<section class="slide s-proc s-gen" data-n="1">
+<div class="title-wrap">
+  <div class="title-card">
+    <span class="sticker" style="--c:var(--yellow);--tilt:-5deg;top:-18px;left:40px">OSU · COLUMBUS</span>
+    <span class="sticker" style="--c:var(--coral);--tilt:6deg;top:-16px;right:48px">PRIVATE AI AGENTS</span>
+    <div class="big-word">Disco</div>
+    <div class="big-tag">Stress less, party more.</div>
+    <p class="pitch">Your friends know the best spots. Getting everyone there is the hard part.<br>Disco recommends only what your friends vouch for, and each friend’s <b>private agent</b> negotiates the plan, so nobody has to share their budget, diet or schedule.</p>
+    <div class="chips"><span class="chip" style="--c:var(--green)">Friend-backed picks</span><span class="chip" style="--c:var(--purple)">Private negotiation</span><span class="chip" style="--c:var(--yellow)">Plans that actually happen</span></div>
+  </div>
+  <div class="team">
+    <div class="member"><span class="av lg" style="--bg:var(--purple)">R</span>Ricky</div>
+    <div class="member"><span class="av lg" style="--bg:var(--orange)">A</span>Aditya</div>
+    <div class="member"><span class="av lg" style="--bg:var(--green)">A</span>Arnav</div>
+    <div class="member"><span class="av lg" style="--bg:var(--blue)">D</span>Daniel</div>
+  </div>
+  <p class="hint hand">use ← → to move through the slides</p>
+</div></section>
+<section class="slide s-proc" data-n="2">
+<header>
+  <div class="brand"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more.</span></div>
+  <div class="headline">Why we built it, and how it changed</div>
+  <div class="avs" aria-label="The team"><span class="av" style="--bg:var(--purple)">R</span><span class="av" style="--bg:var(--orange)">A</span><span class="av" style="--bg:var(--green)">A</span><span class="av" style="--bg:var(--blue)">D</span></div>
+</header>
+
+<main>
+  <!-- WHY -->
+  <section class="card why">
+    <span class="sticker" style="--c:var(--yellow);--tilt:4deg;top:-12px;right:22px">THE PROBLEM</span>
+    <h2 class="h">Your friends know the best spots. Getting everyone there is the hard part.</h2>
+    <p class="problem">Plans die in the group chat because nobody wants to say <em>“I can’t afford that”</em> or <em>“I’m busy until 9.”</em></p>
+    <div class="stats">
+      <div class="stat" style="--bg:var(--green)"><b>84%</b><span>trust recommendations from friends and family</span><i>Nielsen Global Trust in Advertising, 2013</i></div>
+      <div class="stat" style="--bg:var(--coral-tint)"><b>10.7%</b><span>of Google business reviews flagged as inauthentic</span><i>Uberall / Transparency Co., 2021</i></div>
+      <div class="stat" style="--bg:var(--sky)"><b>75%+</b><span>of Howbout users share their full calendar to make plans</span><i>TechCrunch, 2024</i></div>
+    </div>
+    <p class="answer"><b>Disco:</b> picks come only from friends you trust, and each friend’s private agent checks budget, diet and schedule, so the group sees ✓ or ✗ and never anyone’s reasons.</p>
+  </section>
+
+  <!-- WHAT EXISTS -->
+  <section class="card matrix">
+    <span class="sticker" style="--c:var(--purple);--tilt:-3deg;top:-12px;right:22px">WHAT WE RESEARCHED</span>
+    <h2 class="h">What exists today, and the gap</h2>
+    <table>
+      <thead><tr><th>App</th><th>Friend-backed picks</th><th>Plans the outing</th><th>Keeps limits private</th><th>Agents negotiate</th><th>Gap we saw</th></tr></thead>
+      <tbody>
+        <tr><td class="name"><b>Yelp / Google reviews</b><span>public reviews</span></td><td><span class="mk n">✗</span></td><td><span class="mk n">✗</span></td><td><span class="mk n">–</span></td><td><span class="mk n">✗</span></td><td>Strangers’ opinions, some fake; no help getting there</td></tr>
+        <tr><td class="name"><b>Beli</b><span>friends rank restaurants</span></td><td><span class="mk y">✓</span></td><td><span class="mk n">✗</span></td><td><span class="mk n">–</span></td><td><span class="mk n">✗</span></td><td>Great taste graph, but planning still happens in the chat</td></tr>
+        <tr><td class="name"><b>Partiful</b><span>invites, date polls</span></td><td><span class="mk n">✗</span></td><td><span class="mk y">✓</span></td><td><span class="mk n">✗</span></td><td><span class="mk n">✗</span></td><td>Guests tell the host their needs; the host decides by hand</td></tr>
+        <tr><td class="name"><b>Howbout</b><span>shared calendar</span></td><td><span class="mk n">✗</span></td><td><span class="mk y">✓</span></td><td><span class="mk p">~</span></td><td><span class="mk n">✗</span></td><td>Shares free time, not budget or diet; no venue choice</td></tr>
+        <tr><td class="name"><b>When2Meet / Doodle</b><span>availability polls</span></td><td><span class="mk n">✗</span></td><td><span class="mk p">~</span></td><td><span class="mk n">✗</span></td><td><span class="mk n">✗</span></td><td>Time only, and everyone sees everyone’s grid</td></tr>
+        <tr class="us"><td class="name"><b>Disco</b><span>our approach</span></td><td><span class="mk y">✓</span></td><td><span class="mk y">✓</span></td><td><span class="mk y">✓</span></td><td><span class="mk y">✓</span></td><td>Friend picks + private agents that find a plan for everyone</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- HOW IT CHANGED -->
+  <section class="card build">
+    <div class="build-head">
+      <div><h2 class="h">How we built it in one day</h2><p class="sub">Oct 24 · 12:10 pm → 9:02 pm, from the git history</p></div>
+      <div class="facts"><span class="pill c">39 commits</span><span class="pill c">4 builders</span><span class="pill c">~140 automated tests</span><span class="pill c">0 npm dependencies</span></div>
+    </div>
+    <div class="line">
+      <div class="ms" style="left:4%;--bg:var(--gray)"><div class="t">12:10</div><div class="dot"></div><div class="l">Mockups → app; dropped Next.js for zero-dep Node</div></div>
+      <div class="ms" style="left:16%;--bg:var(--sky)"><div class="t">1:18</div><div class="dot"></div><div class="l">All 18 mockup screens working</div></div>
+      <div class="ms" style="left:28%;--bg:var(--purple)"><div class="t">1:29–2:55</div><div class="dot"></div><div class="l">Privacy boundaries + agent eval set</div></div>
+      <div class="ms" style="left:40%;--bg:var(--coral)"><div class="t">3:06</div><div class="dot"></div><div class="l">Security review; encryption at rest</div></div>
+      <div class="ms" style="left:52%;--bg:var(--purple)"><div class="t">3:09</div><div class="dot"></div><div class="l">Model plans converge; Nemotron added</div></div>
+      <div class="ms" style="left:64%;--bg:var(--orange)"><div class="t">4:16–5:28</div><div class="dot"></div><div class="l">Google Places photos, hours, prices</div></div>
+      <div class="ms" style="left:76%;--bg:var(--yellow)"><div class="t">5:45–7:04</div><div class="dot"></div><div class="l">Adventure chats + proactive plans</div></div>
+      <div class="ms" style="left:88%;--bg:var(--green)"><div class="t">7:59–8:43</div><div class="dot"></div><div class="l">Private calendar; full app audit</div></div>
+    </div>
+    <div class="pivots-h"><h3 class="h" style="font-size:20px">It broke → we changed it</h3><span class="hand">every one of these came from testing our own app</span></div>
+    <div class="pivots">
+      <div class="pv"><div class="broke">Model plans never agreed</div><div class="why">The planner model rejected venues on taste, so 3 rounds ended undecided.</div><div class="arrow">→ we changed it</div><div class="fix">Hard rules in code; the model only judges soft fit, and a preference swaps the venue once.</div><div class="win"><span>plans converge</span></div></div>
+      <div class="pv"><div class="broke">A host could learn a friend’s budget</div><div class="why">We reproduced it: propose a few allowances, watch who says no.</div><div class="arrow">→ we changed it</div><div class="fix">Verdicts hidden, $5 allowance steps, 12 negotiations per friend per day.</div><div class="win"><span>leak capped at a $5 range</span></div></div>
+      <div class="pv"><div class="broke">Chat posted public reviews</div><div class="why">“I loved X” became a review, and the raw message could hold private details.</div><div class="arrow">→ we changed it</div><div class="fix">The agent suggests a review; you write the note and post it.</div><div class="win"><span>nothing posts without you</span></div></div>
+      <div class="pv"><div class="broke">Agent JSON got cut off</div><div class="why">Thinking tokens used up the 1,500-token output cap mid-answer.</div><div class="arrow">→ we changed it</div><div class="fix">Minimal thinking for Gemini; reasoning off for Nemotron.</div><div class="win"><span>&gt;1 s saved per Nemotron call</span></div></div>
+      <div class="pv"><div class="broke">Wrong restaurant photos</div><div class="why">Chains matched a farther branch: Google’s location “bias” only nudges.</div><div class="arrow">→ we changed it</div><div class="fix">Search restricted to a 400 m box around the venue.</div><div class="win"><span>+13 of 259 matched, 0 wrong</span></div></div>
+      <div class="pv"><div class="broke">Match cards leaked hours</div><div class="why">Showing the exact shared free time revealed a friend’s private schedule.</div><div class="arrow">→ we changed it</div><div class="fix">Cards say “Both free Saturday evening”, never the exact overlap.</div><div class="win"><span>coarse by design</span></div></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span class="hand">People make the social decisions. Their agents handle the coordination.</span>
+  <span class="fine">Sources: Nielsen, “Earned advertising remains most credible among consumers” (2013) · Uberall &amp; The Transparency Company fake-review study (2021) · TechCrunch, “Howbout raises $8M…” (2024) · Beli, Partiful, Howbout features from public coverage and app listings, Oct 2026.</span>
+</footer>
+</section>
+<section class="slide s-arch" data-n="3">
+<header>
+  <div class="brand"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more.</span></div>
+  <div class="headline-wrap"><div class="headline">How Disco works, end to end</div><div class="purpose">Plans die in the group chat. Private agents find a plan for everyone, without anyone sharing their budget.</div></div>
+  <div class="crew">
+    <div class="avs" aria-label="The four demo users">
+      <span class="av" style="--bg:var(--purple)">R</span><span class="av" style="--bg:var(--orange)">A</span><span class="av" style="--bg:var(--green)">A</span><span class="av" style="--bg:var(--blue)">D</span>
+    </div>
+    <span class="icon-circle" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 14 14"><rect x="2.5" y="6" width="9" height="6.5" rx="1.5" fill="none" stroke="#1D1A2F" stroke-width="1.6"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" fill="none" stroke="#1D1A2F" stroke-width="1.6"/></svg></span>
+  </div>
+</header>
+
+<main>
+  <section class="card sh-5 stage">
+    <div class="stage-head">
+      <h2 class="h">From a chat message to a confirmed night out</h2>
+      <div class="legend">
+        <span class="pill"><i style="--c:var(--purple)"></i>AI agent</span>
+        <span class="pill"><i style="--c:var(--green)"></i>Enforced in code</span>
+        <span class="pill"><i style="--c:var(--orange)"></i>External API</span>
+        <span class="pill dash">- - optional / fallback</span>
+      </div>
+    </div>
+    <div id="diagram"><div class="canvas" id="canvas">
+      <svg id="wires"><defs><marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5L1 8.5" fill="none" stroke="#1D1A2F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="ahd" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5L1 8.5" fill="none" stroke="#4A4558" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></marker></defs></svg>
+
+      <!-- zones -->
+      <div class="zone" style="left:0;top:20px;width:206px;height:318px"><h3>People</h3></div>
+      <div class="zone" style="left:240px;top:20px;width:214px;height:318px"><h3>Browser</h3></div>
+      <div class="zone" style="left:488px;top:20px;width:222px;height:450px"><h3>Node.js server</h3></div>
+      <div class="zone engine" style="left:744px;top:20px;width:390px;height:700px"><h3>Engine: the agents</h3></div>
+      <div class="zone privacy" style="left:760px;top:372px;width:358px;height:332px"><h3>Private to each friend</h3></div>
+      <div class="zone" style="left:1168px;top:20px;width:172px;height:486px"><h3>Model &amp; data APIs</h3></div>
+      <div class="zone" style="left:240px;top:508px;width:470px;height:212px"><h3>Storage</h3></div>
+
+      <!-- people / browser -->
+      <div class="n user" id="USERS" style="left:16px;top:62px;width:174px"><b>Four friends</b><span>each with a private agent</span>
+        <div class="mini"><i style="--bg:var(--purple)">R</i><i style="--bg:var(--orange)">A</i><i style="--bg:var(--green)">A</i><i style="--bg:var(--blue)">D</i></div></div>
+      <div class="n user" id="DEMO" style="left:16px;top:218px;width:174px"><b>/demo</b><span>all four phones side by side</span></div>
+      <div class="n fe" id="APP" style="left:256px;top:62px;width:182px"><b>Vanilla JS app</b><span>Chat · Feed · Adventures · You</span></div>
+
+      <!-- server -->
+      <div class="n secure" id="SEC" style="left:504px;top:62px;width:190px"><b>Security gate</b><span>checks the bearer token · CSP · rate limits</span></div>
+      <div class="n" id="API" style="left:504px;top:200px;width:190px"><b>JSON API</b><span>~45 routes</span></div>
+      <div class="n" id="SSE" style="left:504px;top:330px;width:190px"><b>Live updates</b><span>SSE sends a revision number, never data</span></div>
+
+      <!-- engine -->
+      <div class="n agent" id="CHAT" style="left:760px;top:62px;width:170px"><b>Personal chat agent</b><span>reads intent as JSON: plan · recommend · review · remember</span></div>
+      <div class="n agent" id="PRO" style="left:948px;top:62px;width:170px"><b>Proactive agent</b><span>opt-in · two friends saved the same spot</span></div>
+      <div class="n rules" id="REC" style="left:760px;top:222px;width:170px"><b>Recommender</b><span>ranks only your friends' reviews</span></div>
+      <div class="n agent" id="COORD" style="left:948px;top:222px;width:170px"><b>Coordinator</b><span>≤ 3 rounds of times, $5 steps, venues</span></div>
+      <div class="n agent stack" id="PA" style="left:786px;top:430px;width:196px"><b>Private planner agents</b><span>one per friend · asks Gemini about soft fit only</span>
+        <div class="mini"><i style="--bg:var(--orange)">A</i><i style="--bg:var(--green)">A</i><i style="--bg:var(--blue)">D</i></div></div>
+      <div class="n rules" id="RULES" style="left:778px;top:584px;width:322px"><b>Hard checks in code</b><span>budget · schedule · calendar · strict diet · open? The model can’t override them.</span></div>
+      <span class="callout" style="left:792px;top:672px;--tilt:-1.5deg">friends see ✓ or ✗, never your budget</span>
+
+      <!-- providers -->
+      <div class="n provider" id="GEM" style="left:1182px;top:62px;width:144px"><b>Google Gemini</b><span>Flash · JSON-only</span></div>
+      <div class="n fallback" id="NV" style="left:1182px;top:180px;width:144px"><b>NVIDIA Nemotron</b><span>or this model instead</span></div>
+      <div class="n fallback" id="LOC" style="left:1182px;top:290px;width:144px"><b>Local rules</b><span>no key or call fails</span></div>
+      <div class="n provider" id="WEB" style="left:1182px;top:400px;width:144px"><b>Web facts</b><span>hours, prices, photos for the checks</span></div>
+
+      <!-- storage -->
+      <div class="n store" id="SEED" style="left:256px;top:578px;width:200px"><b>seed.json</b><span>4,251 OSM venues + demo reviews, loaded on first run</span></div>
+      <div class="n store" id="DB" style="left:494px;top:578px;width:200px"><b>SQLite</b><span>one AES-256-GCM blob, re-sealed on every save</span></div>
+
+      <!-- privacy promise, under the providers column -->
+      <div class="promise" id="PRIV" style="left:1168px;top:528px;width:172px">
+        <h3>Privacy by design</h3>
+        <p><span class="ic sm">✓</span>Each agent sees only its owner's budget, diet and schedule</p>
+        <p><span class="ic sm">✓</span>Hosts see who's in, never anyone's reasons or limits</p>
+        <p><span class="ic sm">✓</span>Web searches carry no personal data at all</p>
+      </div>
+
+      <!-- how a night out happens -->
+      <div class="steps" style="left:0;top:372px;width:206px">
+        <h3>A night out</h3>
+        <ul>
+          <li><span class="step">1</span>Host tells their agent the plan in chat</li>
+          <li><span class="step">2</span>Coordinator proposes time, place, budget</li>
+          <li><span class="step">3</span>Each friend's agent checks privately</li>
+          <li><span class="step">4</span>Host approves, invites go out live</li>
+          <li><span class="step">5</span>Everyone's in → booked + calendar file</li>
+        </ul>
+      </div>
+    </div></div>
+    <div class="life">
+      <span class="label">Plan lifecycle</span>
+      <span class="state" style="--c:var(--gray)">drafting</span><span class="arr">→</span>
+      <span class="state" style="--c:var(--purple)">negotiating</span><span class="arr">→</span>
+      <span class="state" style="--c:var(--yellow)">awaiting approval</span><span class="arr">→</span>
+      <span class="state" style="--c:var(--yellow)">invited</span><span class="arr">→</span>
+      <span class="state" style="--c:var(--green)">confirmed</span><span class="arr">→</span>
+      <span class="state" style="--c:var(--green)">booked + .ics</span>
+      <span class="arr" style="margin-left:8px">·</span>
+      <span class="state" style="--c:var(--coral)">needs decision</span>
+      <span class="note">no fit in 3 rounds → host<br>picks a suggestion, agents recheck</span>
+    </div>
+  </section>
+
+  <aside class="card sh-5">
+    <h2 class="h">The stack</h2>
+    <p class="sub">Zero npm dependencies. No build step.</p>
+
+    <div class="group"><span class="ghead">Frontend</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" fill="#1D1A2F"/><g fill="#F7DF1E"><path d="M0 0h24v24H0V0zm22.034 18.276c-.175-1.095-.888-2.015-3.003-2.873-.736-.345-1.554-.585-1.797-1.14-.091-.33-.105-.51-.046-.705.15-.646.915-.84 1.515-.66.39.12.75.42.976.9 1.034-.676 1.034-.676 1.755-1.125-.27-.42-.404-.601-.586-.78-.63-.705-1.469-1.065-2.834-1.034l-.705.089c-.676.165-1.32.525-1.71 1.005-1.14 1.291-.811 3.541.569 4.471 1.365 1.02 3.361 1.244 3.616 2.205.24 1.17-.87 1.545-1.966 1.41-.811-.18-1.26-.586-1.755-1.336l-1.83 1.051c.21.48.45.689.81 1.109 1.74 1.756 6.09 1.666 6.871-1.004.029-.09.24-.705.074-1.65l.046.067zm-8.983-7.245h-2.248c0 1.938-.009 3.864-.009 5.805 0 1.232.063 2.363-.138 2.711-.33.689-1.18.601-1.566.48-.396-.196-.597-.466-.83-.855-.063-.105-.11-.196-.127-.196l-1.825 1.125c.305.63.75 1.172 1.324 1.517.855.51 2.004.675 3.207.405.783-.226 1.458-.691 1.811-1.411.51-.93.402-2.07.397-3.346.012-2.054 0-4.109 0-6.179l.004-.056z"/></g></svg></span><div><b>Vanilla JS SPA</b><span>ES modules, no framework</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#E34F26"><path d="M1.5 0h21l-1.91 21.563L11.977 24l-8.564-2.438L1.5 0zm7.031 9.75l-.232-2.718 10.059.003.23-2.622L5.412 4.41l.698 8.01h9.126l-.326 3.426-2.91.804-2.955-.81-.188-2.11H6.248l.33 4.171L12 19.351l5.379-1.443.744-8.157H8.531z"/></g></svg></span><div><b>HTML5 + CSS3</b><span>party-flyer design system</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#4285F4"><path d="M4 2.8A3.6 3.6 0 1 0 4 10a3.6 3.6 0 0 0 0-7.2zm7.6 0v18.4h7.2a5.2 5.2 0 1 1 0-10.4 4 4 0 1 1 0-8zm7.2 0v8a4 4 0 1 0 0-8zm0 8v10.4A5.2 5.2 0 0 0 24 16a5.2 5.2 0 0 0-5.2-5.2zm-7.7-7.206L0 21.199h8.8l2.3-3.64Z"/></g></svg></span><div><b>Self-hosted fonts</b><span>Bricolage · Hanken · Caveat</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h2.5v2.5M20.5 14v6.5h-6.5M17.5 17.5h.01"/></svg></span><div><b>QR invites</b><span>custom tiny encoder</span></div></div>
+    </div></div>
+
+    <div class="group"><span class="ghead">Backend</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#5FA04E"><path d="M11.998,24c-0.321,0-0.641-0.084-0.922-0.247l-2.936-1.737c-0.438-0.245-0.224-0.332-0.08-0.383 c0.585-0.203,0.703-0.25,1.328-0.604c0.065-0.037,0.151-0.023,0.218,0.017l2.256,1.339c0.082,0.045,0.197,0.045,0.272,0l8.795-5.076 c0.082-0.047,0.134-0.141,0.134-0.238V6.921c0-0.099-0.053-0.192-0.137-0.242l-8.791-5.072c-0.081-0.047-0.189-0.047-0.271,0 L3.075,6.68C2.99,6.729,2.936,6.825,2.936,6.921v10.15c0,0.097,0.054,0.189,0.139,0.235l2.409,1.392 c1.307,0.654,2.108-0.116,2.108-0.89V7.787c0-0.142,0.114-0.253,0.256-0.253h1.115c0.139,0,0.255,0.112,0.255,0.253v10.021 c0,1.745-0.95,2.745-2.604,2.745c-0.508,0-0.909,0-2.026-0.551L2.28,18.675c-0.57-0.329-0.922-0.945-0.922-1.604V6.921 c0-0.659,0.353-1.275,0.922-1.603l8.795-5.082c0.557-0.315,1.296-0.315,1.848,0l8.794,5.082c0.57,0.329,0.924,0.944,0.924,1.603 v10.15c0,0.659-0.354,1.273-0.924,1.604l-8.794,5.078C12.643,23.916,12.324,24,11.998,24z M19.099,13.993 c0-1.9-1.284-2.406-3.987-2.763c-2.731-0.361-3.009-0.548-3.009-1.187c0-0.528,0.235-1.233,2.258-1.233 c1.807,0,2.473,0.389,2.747,1.607c0.024,0.115,0.129,0.199,0.247,0.199h1.141c0.071,0,0.138-0.031,0.186-0.081 c0.048-0.054,0.074-0.123,0.067-0.196c-0.177-2.098-1.571-3.076-4.388-3.076c-2.508,0-4.004,1.058-4.004,2.833 c0,1.925,1.488,2.457,3.895,2.695c2.88,0.282,3.103,0.703,3.103,1.269c0,0.983-0.789,1.402-2.642,1.402 c-2.327,0-2.839-0.584-3.011-1.742c-0.02-0.124-0.126-0.215-0.253-0.215h-1.137c-0.141,0-0.254,0.112-0.254,0.253 c0,1.482,0.806,3.248,4.655,3.248C17.501,17.007,19.099,15.91,19.099,13.993z"/></g></svg></span><div><b>Node.js 24</b><span>plain node:http server</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 2.5L5 13.5h6.5l-1 8L19 10.5h-6.5z" fill="#FFD666" stroke="#1D1A2F" stroke-width="2" stroke-linejoin="round"/></svg></span><div><b>Server-Sent Events</b><span>live four-phone sync</span></div></div>
+    </div></div>
+
+    <div class="group"><span class="ghead">AI agents</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#8E75B2"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></g></svg></span><div><b>Gemini Flash</b><span>chat + planner agents</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#76B900"><path d="M8.948 8.798v-1.43a6.7 6.7 0 0 1 .424-.018c3.922-.124 6.493 3.374 6.493 3.374s-2.774 3.851-5.75 3.851c-.398 0-.787-.062-1.158-.185v-4.346c1.528.185 1.837.857 2.747 2.385l2.04-1.714s-1.492-1.952-4-1.952a6.016 6.016 0 0 0-.796.035m0-4.735v2.138l.424-.027c5.45-.185 9.01 4.47 9.01 4.47s-4.08 4.964-8.33 4.964c-.37 0-.733-.035-1.095-.097v1.325c.3.035.61.062.91.062 3.957 0 6.82-2.023 9.593-4.408.459.371 2.34 1.263 2.73 1.652-2.633 2.208-8.772 3.984-12.253 3.984-.335 0-.653-.018-.971-.053v1.864H24V4.063zm0 10.326v1.131c-3.657-.654-4.673-4.46-4.673-4.46s1.758-1.944 4.673-2.262v1.237H8.94c-1.528-.186-2.73 1.245-2.73 1.245s.68 2.412 2.739 3.11M2.456 10.9s2.164-3.197 6.5-3.533V6.201C4.153 6.59 0 10.653 0 10.653s2.35 6.802 8.948 7.42v-1.237c-4.84-.6-6.492-5.936-6.492-5.936z"/></g></svg></span><div><b>Nemotron 3.5</b><span>alternate (NVIDIA NIM)</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#4285F4"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></g></svg></span><div><b>Search grounding</b><span>Gemini + Google Search</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="#B79CFF" stroke="#1D1A2F" stroke-width="2"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5" stroke="#1D1A2F" stroke-width="2" stroke-linecap="round"/></svg></span><div><b>Local agents</b><span>deterministic fallback</span></div></div>
+    </div></div>
+
+    <div class="group"><span class="ghead">Data &amp; security</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#003B57"><path d="M21.678.521c-1.032-.92-2.28-.55-3.513.544a8.71 8.71 0 0 0-.547.535c-2.109 2.237-4.066 6.38-4.674 9.544.237.48.422 1.093.544 1.561a13.044 13.044 0 0 1 .164.703s-.019-.071-.096-.296l-.05-.146a1.689 1.689 0 0 0-.033-.08c-.138-.32-.518-.995-.686-1.289-.143.423-.27.818-.376 1.176.484.884.778 2.4.778 2.4s-.025-.099-.147-.442c-.107-.303-.644-1.244-.772-1.464-.217.804-.304 1.346-.226 1.478.152.256.296.698.422 1.186.286 1.1.485 2.44.485 2.44l.017.224a22.41 22.41 0 0 0 .056 2.748c.095 1.146.273 2.13.5 2.657l.155-.084c-.334-1.038-.47-2.399-.41-3.967.09-2.398.642-5.29 1.661-8.304 1.723-4.55 4.113-8.201 6.3-9.945-1.993 1.8-4.692 7.63-5.5 9.788-.904 2.416-1.545 4.684-1.931 6.857.666-2.037 2.821-2.912 2.821-2.912s1.057-1.304 2.292-3.166c-.74.169-1.955.458-2.362.629-.6.251-.762.337-.762.337s1.945-1.184 3.613-1.72C21.695 7.9 24.195 2.767 21.678.521m-18.573.543A1.842 1.842 0 0 0 1.27 2.9v16.608a1.84 1.84 0 0 0 1.835 1.834h9.418a22.953 22.953 0 0 1-.052-2.707c-.006-.062-.011-.141-.016-.2a27.01 27.01 0 0 0-.473-2.378c-.121-.47-.275-.898-.369-1.057-.116-.197-.098-.31-.097-.432 0-.12.015-.245.037-.386a9.98 9.98 0 0 1 .234-1.045l.217-.028c-.017-.035-.014-.065-.031-.097l-.041-.381a32.8 32.8 0 0 1 .382-1.194l.2-.019c-.008-.016-.01-.038-.018-.053l-.043-.316c.63-3.28 2.587-7.443 4.8-9.791.066-.069.133-.128.198-.194Z"/></g></svg></span><div><b>SQLite</b><span>built-in node:sqlite</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10.5V7.5a4 4 0 018 0v3" fill="none" stroke="#1D1A2F" stroke-width="2.2"/><rect x="4.5" y="10.5" width="15" height="10" rx="2.5" fill="#79D18A" stroke="#1D1A2F" stroke-width="2"/></svg></span><div><b>AES-256-GCM</b><span>encrypted at rest</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 12h9M18.5 12v3.5M21.5 12v2.5" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round"/><circle cx="8" cy="12" r="4.5" fill="#FFB86B" stroke="#1D1A2F" stroke-width="2"/></svg></span><div><b>scrypt + SHA-256</b><span>passwords · tokens</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#3776AB"><path d="M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z"/></g></svg></span><div><b>Python import</b><span>workbook → seed.json</span></div></div>
+    </div></div>
+
+    <div class="group"><span class="ghead">Places &amp; maps</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#4285F4"><path d="M19.527 4.799c1.212 2.608.937 5.678-.405 8.173-1.101 2.047-2.744 3.74-4.098 5.614-.619.858-1.244 1.75-1.669 2.727-.141.325-.263.658-.383.992-.121.333-.224.673-.34 1.008-.109.314-.236.684-.627.687h-.007c-.466-.001-.579-.53-.695-.887-.284-.874-.581-1.713-1.019-2.525-.51-.944-1.145-1.817-1.79-2.671L19.527 4.799zM8.545 7.705l-3.959 4.707c.724 1.54 1.821 2.863 2.871 4.18.247.31.494.622.737.936l4.984-5.925-.029.01c-1.741.601-3.691-.291-4.392-1.987a3.377 3.377 0 0 1-.209-.716c-.063-.437-.077-.761-.004-1.198l.001-.007zM5.492 3.149l-.003.004c-1.947 2.466-2.281 5.88-1.117 8.77l4.785-5.689-.058-.05-3.607-3.035zM14.661.436l-3.838 4.563a.295.295 0 0 1 .027-.01c1.6-.551 3.403.15 4.22 1.626.176.319.323.683.377 1.045.068.446.085.773.012 1.22l-.003.016 3.836-4.561A8.382 8.382 0 0 0 14.67.439l-.009-.003zM9.466 5.868L14.162.285l-.047-.012A8.31 8.31 0 0 0 11.986 0a8.439 8.439 0 0 0-6.169 2.766l-.016.018 3.665 3.084z"/></g></svg></span><div><b>Google Places</b><span>photos · hours · prices</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#7EBC6F"><path d="M2.672 23.969c-.352-.089-.534-.234-1.471-1.168C.085 21.688.014 21.579.018 20.999c0-.645-.196-.414 3.368-3.986 3.6-3.608 3.415-3.451 4.064-3.449.302 0 .378.016.62.14l.277.14 1.744-1.744-.218-.343c-.425-.662-.825-1.629-1.006-2.429a7.657 7.657 0 0 1 1.479-6.44c2.49-3.12 6.959-3.812 10.26-1.588 1.812 1.218 2.99 3.099 3.328 5.314.07.467.07 1.579 0 2.074a7.554 7.554 0 0 1-2.205 4.402 6.712 6.712 0 0 1-1.943 1.401c-.959.483-1.775.71-2.881.803-1.573.131-3.32-.305-4.656-1.163l-.343-.218-1.744 1.744.14.28c.125.241.14.316.14.617.003.651.156.467-3.426 4.049-2.761 2.756-3.186 3.164-3.398 3.261-.271.125-.69.171-.945.106zM17.485 13.95a6.425 6.425 0 0 0 4.603-3.51c1.391-2.899.455-6.306-2.227-8.108-.638-.43-1.529-.794-2.367-.962-.581-.117-1.809-.104-2.414.025a6.593 6.593 0 0 0-2.452 1.064c-.444.315-1.177 1.048-1.487 1.487a6.384 6.384 0 0 0 .38 7.907 6.406 6.406 0 0 0 3.901 2.136c.509.078 1.542.058 2.065-.037zm-3.738 7.376a80.97 80.97 0 0 1-2.196-.651c-.025-.028 1.207-4.396 1.257-4.449.023-.026 4.242 1.152 4.414 1.236.062.026-.003.288-.525 2.102a398.513 398.513 0 0 0-.635 2.236c-.025.087-.069.156-.097.156-.028-.003-1.028-.287-2.219-.631zm2.912.524c0-.053 1.227-4.333 1.246-4.347.047-.034 4.324-1.23 4.341-1.211.019.019-1.199 4.337-1.23 4.36-.02.019-4.126 1.191-4.259 1.218-.054.011-.098 0-.098-.019zm-7.105-1.911c.846-.852 1.599-1.627 1.674-1.728.171-.218.405-.732.472-1.015.026-.118.053-.352.058-.522l.011-.307.182-.051c.103-.028.193-.044.202-.034.023.025-1.207 4.321-1.246 4.36-.02.016-.677.213-1.464.436l-1.425.405 1.537-1.542zm8.289-3.06a1.371 1.371 0 0 1-.059-.187l-.044-.156.156-.028c1.339-.227 2.776-.856 3.908-1.713.16-.125.252-.171.265-.134.054.165.272.95.265.959-.034.034-4.48 1.282-4.492 1.261zm-15.083-1.3c-.05-.039-1.179-3.866-1.264-4.29-.016-.084.146-.044 2.174.536 2.121.604 2.192.629 2.222.74.028.098.011.129-.125.223-.084.059-.769.724-1.523 1.479a63.877 63.877 0 0 1-1.39 1.367c-.016 0-.056-.025-.093-.054zm.821-4.378c-1.188-.343-2.164-.623-2.167-.626-.016-.012 1.261-4.433 1.285-4.46.022-.022 4.422 1.211 4.469 1.252.009.009-.269 1.017-.618 2.239-.576 2.02-.643 2.224-.723 2.22-.05-.003-1.059-.285-2.247-.626zm2.959.538c.012-.031.212-.723.444-1.534l.42-1.476.056.321c.093.556.265 1.188.464 1.741.106.296.187.539.181.545-.008.006-.332.101-.719.212-.389.109-.741.21-.786.224-.058.016-.075.006-.059-.034zM4.905 6.112c-1.187-.339-2.167-.635-2.18-.654-.04-.062-1.246-4.321-1.23-4.338.026-.025 4.31 1.204 4.351 1.246.047.051 1.28 4.379 1.246 4.376L4.91 6.113zm2.148-1.713l-.519-1.806-.078-.28 1.693-.483c.934-.265 1.724-.495 1.76-.508.034-.016-.083.14-.26.336A8.729 8.729 0 0 0 7.69 5.23a4.348 4.348 0 0 0-.132.561c0 .293-.115-.025-.505-1.39z"/></g></svg></span><div><b>OpenStreetMap</b><span>4,251 Columbus venues</span></div></div>
+    </div></div>
+
+    <div class="group"><span class="ghead">Quality</span><div class="tiles">
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#79D18A" stroke="#1D1A2F" stroke-width="2"/><path d="M7.5 12.5l3 3 6-6.5" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><b>~140 tests</b><span>node:test · privacy · flow</span></div></div>
+      <div class="tile"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#2088FF"><path d="M10.984 13.836a.5.5 0 0 1-.353-.146l-.745-.743a.5.5 0 1 1 .706-.708l.392.391 1.181-1.18a.5.5 0 0 1 .708.707l-1.535 1.533a.504.504 0 0 1-.354.146zm9.353-.147l1.534-1.532a.5.5 0 0 0-.707-.707l-1.181 1.18-.392-.391a.5.5 0 1 0-.706.708l.746.743a.497.497 0 0 0 .706-.001zM4.527 7.452l2.557-1.585A1 1 0 0 0 7.09 4.17L4.533 2.56A1 1 0 0 0 3 3.406v3.196a1.001 1.001 0 0 0 1.527.85zm2.03-2.436L4 6.602V3.406l2.557 1.61zM24 12.5c0 1.93-1.57 3.5-3.5 3.5a3.503 3.503 0 0 1-3.46-3h-2.08a3.503 3.503 0 0 1-3.46 3 3.502 3.502 0 0 1-3.46-3h-.558c-.972 0-1.85-.399-2.482-1.042V17c0 1.654 1.346 3 3 3h.04c.244-1.693 1.7-3 3.46-3 1.93 0 3.5 1.57 3.5 3.5S13.43 24 11.5 24a3.502 3.502 0 0 1-3.46-3H8c-2.206 0-4-1.794-4-4V9.899A5.008 5.008 0 0 1 0 5c0-2.757 2.243-5 5-5s5 2.243 5 5a5.005 5.005 0 0 1-4.952 4.998A2.482 2.482 0 0 0 7.482 12h.558c.244-1.693 1.7-3 3.46-3a3.502 3.502 0 0 1 3.46 3h2.08a3.503 3.503 0 0 1 3.46-3c1.93 0 3.5 1.57 3.5 3.5zm-15 8c0 1.378 1.122 2.5 2.5 2.5s2.5-1.122 2.5-2.5-1.122-2.5-2.5-2.5S9 19.122 9 20.5zM5 9c2.206 0 4-1.794 4-4S7.206 1 5 1 1 2.794 1 5s1.794 4 4 4zm9 3.5c0-1.378-1.122-2.5-2.5-2.5S9 11.122 9 12.5s1.122 2.5 2.5 2.5 2.5-1.122 2.5-2.5zm9 0c0-1.378-1.122-2.5-2.5-2.5S18 11.122 18 12.5s1.122 2.5 2.5 2.5 2.5-1.122 2.5-2.5zm-13 8a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0zm2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0zm12 0c0 1.93-1.57 3.5-3.5 3.5a3.503 3.503 0 0 1-3.46-3.002c-.007.001-.013.005-.021.005l-.506.017h-.017a.5.5 0 0 1-.016-.999l.506-.017c.018-.002.035.006.052.007A3.503 3.503 0 0 1 20.5 17c1.93 0 3.5 1.57 3.5 3.5zm-1 0c0-1.378-1.122-2.5-2.5-2.5S18 19.122 18 20.5s1.122 2.5 2.5 2.5 2.5-1.122 2.5-2.5z"/></g></svg></span><div><b>GitHub Actions</b><span>CI + gitleaks scan</span></div></div>
+    </div></div>
+
+  </aside>
+</main>
+
+<footer>
+  <span class="hand">Your friends know the best spots. Your agents handle the coordination.</span>
+  <span class="fine">Demo: seed people and reviews are fictional · booking is simulated, .ics download is real · local mode is rules, not an LLM. OSM data © OpenStreetMap contributors.</span>
+</footer>
+
+
+</section>
+<section class="slide s-proc s-gen" data-n="4"><header><div class="brand"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more.</span></div><div class="headline">The questions that shaped Disco</div><div class="avs"><span class="av" style="--bg:var(--purple)">R</span><span class="av" style="--bg:var(--orange)">A</span><span class="av" style="--bg:var(--green)">A</span><span class="av" style="--bg:var(--blue)">D</span></div></header>
+<main class="qs"><div class="q" style="--c:var(--purple)"><div class="qq">Can a group find a plan if nobody shares their limits?</div><div class="qrow"><span class="tag">We tested</span>Treated each friend’s agent as a private yes/no oracle.</div><div class="qrow"><span class="tag built">We built</span>A coordinator that searches times, $5 steps and venues from ✓/✗ answers alone.</div></div><div class="q" style="--c:var(--coral)"><div class="qq">Even with no field leaked, can someone <em>infer</em> a friend’s budget?</div><div class="qrow"><span class="tag">We tested</span>Attacked our own app: proposed allowances to one friend and watched the answers.</div><div class="qrow"><span class="tag built">We built</span>Hidden verdicts, $5 steps, 12 negotiations per friend per day.</div></div><div class="q" style="--c:var(--yellow)"><div class="qq">What can <em>only</em> a model judge?</div><div class="qrow"><span class="tag">We tested</span>Built an agent eval set and compared model vs. code decisions.</div><div class="qrow"><span class="tag built">We built</span>Budget, schedule and diet rules in code; the model judges soft fit only.</div></div><div class="q" style="--c:var(--orange)"><div class="qq">Can a hostile venue name or web page hijack an agent?</div><div class="qrow"><span class="tag">We tested</span>Prompt-injection tests with hostile names and model output.</div><div class="qrow"><span class="tag built">We built</span>Output parsed as data; only offered IDs accepted; uncited claims never “verified”.</div></div><div class="q" style="--c:var(--green)"><div class="qq">How do we trust a “halal” or “vegetarian” claim?</div><div class="qrow"><span class="tag">We tested</span>Compared web claims against friends’ tagged reviews.</div><div class="qrow"><span class="tag built">We built</span>Strict diets need evidence, plus a private “check with the restaurant” note.</div></div><div class="q" style="--c:var(--sky)"><div class="qq">Could Disco notice a plan before anyone asks?</div><div class="qrow"><span class="tag">We tested</span>Explored triggers: shared saves, similar interests, events.</div><div class="qrow"><span class="tag built">We built</span>Opt-in suggestions when friends save the same spot; nobody named until all agree.</div></div>
+  <div class="clever">
+    <div class="clever-text"><span class="sticker static" style="--c:var(--yellow);--tilt:-3deg">THE CLEVER PART</span><h3>The coordinator never reads a budget.</h3><p>It finds the plan by asking each private agent “does this work for you?”, then tries the next option. The host only ever sees “a cheaper option is needed”, never whose limit or why.</p></div>
+    <div class="flow">
+      <div class="fstep"><span class="fl">Coordinator asks</span><span class="bubble">Sat 7:00 pm · $25 each?</span></div>
+      <span class="farrow">→</span>
+      <div class="fstep"><span class="fl">Private agents answer</span><span class="votes"><span class="mk y">✓</span><span class="mk n">✗</span><span class="mk y">✓</span></span></div>
+      <span class="farrow">→</span>
+      <div class="fstep"><span class="fl">Coordinator tries</span><span class="bubble">Sat 8:30 pm · $15 each?</span></div>
+      <span class="farrow">→</span>
+      <div class="fstep"><span class="fl">Everyone</span><span class="votes"><span class="mk y">✓</span><span class="mk y">✓</span><span class="mk y">✓</span></span></div>
+    </div>
+  </div>
+</main><footer><span class="hand">People make the social decisions. Their agents handle the coordination.</span><span class="fine"></span></footer></section>
+<section class="slide s-proc s-gen" data-n="5"><header><div class="brand"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more.</span></div><div class="headline">Breadth: more than an app</div><div class="avs"><span class="av" style="--bg:var(--purple)">R</span><span class="av" style="--bg:var(--orange)">A</span><span class="av" style="--bg:var(--green)">A</span><span class="av" style="--bg:var(--blue)">D</span></div></header>
+<main class="br">
+  <section class="card pad">
+    <span class="sticker" style="--c:var(--purple);--tilt:-3deg;top:-12px;right:22px">7 KNOWLEDGE AREAS</span>
+    <h2 class="h">What we drew on</h2>
+    <div class="areas"><div class="area"><span class="aic" style="--c:var(--pink)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 19.5c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5M14 14.6c.8-.4 1.6-.6 2.5-.6 2.3 0 4.2 1.5 4.8 4.5"/></svg></span><div><b>Social psychology</b><span>Trust in friends over strangers; the social cost of saying “I can’t afford that”</span></div></div><div class="area"><span class="aic" style="--c:var(--yellow)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v17M7 20.5h10M4.5 7.5h15M12 5l-7.5 2.5M12 5l7.5 2.5"/><path d="M4.5 7.5L2 13.5a3 3 0 005 0zM19.5 7.5L17 13.5a3 3 0 005 0z"/></svg></span><div><b>Ethics &amp; privacy</b><span>Consent before memory or posting; inference attacks treated as real leaks</span></div></div><div class="area"><span class="aic" style="--c:var(--purple)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></svg></span><div><b>Negotiation design</b><span>Agents as private yes/no oracles; a bounded 3-round search that always ends</span></div></div><div class="area"><span class="aic" style="--c:var(--lav-3)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg></span><div><b>AI engineering</b><span>Two model roles, schema-constrained JSON, evals, fallbacks, injection containment</span></div></div><div class="area"><span class="aic" style="--c:var(--green)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></span><div><b>Security &amp; crypto</b><span>AES-256-GCM at rest, scrypt, hashed tokens, CSP, DNS-rebinding defense</span></div></div><div class="area"><span class="aic" style="--c:var(--orange)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><div><b>Geospatial data</b><span>4,251 OpenStreetMap venues; 400 m matching against Google Places</span></div></div><div class="area"><span class="aic" style="--c:var(--sky)"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#1D1A2F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></svg></span><div><b>Software engineering</b><span>Zero-dependency server, live sync, ~140 automated tests, CI</span></div></div>
+    </div>
+    <div class="hardest"><span class="hand">hardest piece:</span> making the plan visible to the group while keeping every reason private, even from a host who keeps re-proposing.</div>
+  </section>
+  <section class="card pad">
+    <span class="sticker" style="--c:var(--yellow);--tilt:3deg;top:-12px;right:22px">HONEST LIMITS</span>
+    <h2 class="h">What changes at 10× scale</h2>
+    <table class="scale">
+      <thead><tr><th>Today (demo)</th><th>What we’d change</th></tr></thead>
+      <tbody>
+        <tr><td>One encrypted JSON blob, rewritten on every save</td><td>Postgres tables with field-level encryption for private context</td></tr>
+        <tr><td>Rate limits in memory, single server</td><td>Shared limits in Redis + alerts on API spend</td></tr>
+        <tr><td>4 prepared accounts, one demo password</td><td>Sign-up, per-user passwords, 2FA, recovery</td></tr>
+        <tr><td>Simulated booking + <code>.ics</code> download</td><td>Reservation partner APIs; Google/Apple calendar sync</td></tr>
+        <tr><td>One model call per friend per round</td><td>Hard rules already run free in code; cache soft-fit verdicts</td></tr>
+        <tr><td>Columbus / OSU venues</td><td>Change one bounding box in the OSM import; Places works anywhere</td></tr>
+      </tbody>
+    </table>
+    <p class="bonus"><span class="mk y">✓</span><span>More people means a denser friend graph, so recommendations get <b>better</b> with scale.</span></p>
+  </section>
+</main><footer><span class="hand">People make the social decisions. Their agents handle the coordination.</span><span class="fine"></span></footer></section>
+<section class="slide s-proc s-gen" data-n="6"><header><div class="brand"><span class="wordmark">Disco</span><span class="tagline">Stress less, party more.</span></div><div class="headline">Impact: who it helps, and why it can ship</div><div class="avs"><span class="av" style="--bg:var(--purple)">R</span><span class="av" style="--bg:var(--orange)">A</span><span class="av" style="--bg:var(--green)">A</span><span class="av" style="--bg:var(--blue)">D</span></div></header>
+<main class="im">
+  <section class="card pad col-who">
+    <span class="sticker" style="--c:var(--yellow);--tilt:-4deg;top:-12px;right:20px">WHO</span>
+    <h2 class="h">College friend groups</h2>
+    <p class="lede">People who go out often but stall in the group chat. We started with OSU students in Columbus.</p>
+    <h3 class="mini-h">What they need</h3>
+    <ul class="needs">
+      <li><span class="mk y">✓</span><div>A place everyone will like <i>→ friend-vouched picks</i></div></li>
+      <li><span class="mk y">✓</span><div>A time that works, no poll <i>→ agents check private schedules</i></div></li>
+      <li><span class="mk y">✓</span><div>Stay on budget without saying the number <i>→ private budget checks</i></div></li>
+      <li><span class="mk y">✓</span><div>Strict diets respected <i>→ diets need evidence</i></div></li>
+      <li><span class="mk y">✓</span><div>No pressure, no exposure <i>→ reasons stay private; consent first</i></div></li>
+    </ul>
+    <div class="moment"><span class="ml">the moment we design for</span><span class="mq">“I can’t afford that.”</span><span class="mcap">said to nobody, because their agent said it privately.</span></div>
+  </section>
+  <section class="card pad col-value">
+    <span class="sticker" style="--c:var(--green);--tilt:3deg;top:-12px;right:20px">VALUE</span>
+    <h2 class="h">What it creates</h2>
+    <div class="vals">
+      <div class="val" style="--c:var(--pink)"><b>Social</b><span>More plans actually happen, and quieter or lower-budget friends aren’t left out.</span></div>
+      <div class="val" style="--c:var(--orange)"><b>Economic</b><span>Restaurants get group visits from trusted word of mouth; people avoid overspending.</span></div>
+      <div class="val" style="--c:var(--purple)"><b>Privacy</b><span>A working model of coordinating without disclosing, useful beyond dinners: study groups, team offsites.</span></div>
+    </div>
+  </section>
+  <section class="card pad col-feas">
+    <span class="sticker" style="--c:var(--coral);--tilt:-3deg;top:-12px;right:20px">FEASIBLE</span>
+    <h2 class="h">Why it can ship</h2>
+    <ul class="feas">
+      <li><b>It runs today</b>, end to end, in one command</li>
+      <li><b>$0 to run</b> without an API key (local agents)</li>
+      <li><b>Costs are capped</b>: 20 model calls/min per user; Places priced per lookup</li>
+      <li><b>No dependencies</b> to patch or break</li>
+    </ul>
+    <h3 class="mini-h push">Next steps</h3>
+    <ol class="next">
+      <li><span>1</span>Test with real friend groups at OSU</li>
+      <li><span>2</span>Real accounts + calendar sync</li>
+      <li><span>3</span>Reservation partner integration</li>
+    </ol>
+  </section>
+</main><footer><span class="hand">People make the social decisions. Their agents handle the coordination.</span><span class="fine"></span></footer></section>
+<section class="slide s-proc s-gen" data-n="7">
+<div class="title-wrap">
+  <div class="title-card close">
+    <span class="sticker" style="--c:var(--coral);--tilt:-4deg;top:-18px;left:44px">LIVE DEMO</span>
+    <div class="big-word sm">Try it</div>
+    <div class="demo-path"><span class="url">npm start</span><span class="farrow">→</span><span class="url">localhost:3000/demo</span></div>
+    <div class="takeaways">
+      <div class="tk" style="--c:var(--green)"><b>Picks you can trust</b><span>Every recommendation quotes a real friend.</span></div>
+      <div class="tk" style="--c:var(--purple)"><b>Plans without oversharing</b><span>Private agents negotiate; the group sees ✓ or ✗.</span></div>
+      <div class="tk" style="--c:var(--yellow)"><b>Built to be trusted</b><span>Hard rules in code, encryption at rest, ~140 tests.</span></div>
+    </div>
+  </div>
+  <p class="thanks hand">Thank you! Questions?</p>
+  <div class="team">
+    <div class="member"><span class="av lg" style="--bg:var(--purple)">R</span>Ricky</div>
+    <div class="member"><span class="av lg" style="--bg:var(--orange)">A</span>Aditya</div>
+    <div class="member"><span class="av lg" style="--bg:var(--green)">A</span>Arnav</div>
+    <div class="member"><span class="av lg" style="--bg:var(--blue)">D</span>Daniel</div>
+  </div>
+</div></section>
+</div>
+<nav id="nav" aria-label="Slides"><button id="prev" aria-label="Previous slide">←</button><span class="count" id="count"></span><button id="next" aria-label="Next slide">→</button></nav>
+<script>
+
+const slides = [...document.querySelectorAll('.slide')], deck = document.getElementById('deck');
+const prev = document.getElementById('prev'), next = document.getElementById('next'), count = document.getElementById('count');
+let i = Math.min(slides.length, Math.max(1, parseInt(location.hash.slice(1)) || 1)) - 1;
+function show(n) {
+  i = Math.max(0, Math.min(slides.length - 1, n));
+  slides.forEach((s, k) => s.classList.toggle('on', k === i));
+  count.textContent = `${i + 1} / ${slides.length}`; prev.disabled = i === 0; next.disabled = i === slides.length - 1;
+  history.replaceState(null, '', `#${i + 1}`);
+}
+function fit() { const k = Math.min(innerWidth / 1920, innerHeight / 1080); deck.style.transform = `translate(-50%,-50%) scale(${k})`; }
+addEventListener('keydown', e => {
+  if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); show(i + 1); }
+  else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+  else if (e.key === 'Home') show(0); else if (e.key === 'End') show(slides.length - 1);
+  else if (e.key === 'f') document.documentElement.requestFullscreen?.();
+});
+prev.onclick = () => show(i - 1); next.onclick = () => show(i + 1);
+// The nav fades out while presenting and comes back when the mouse moves.
+let idle; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => document.body.classList.add('idle'), 2500); };
+addEventListener('mousemove', wake); addEventListener('resize', fit);
+fit(); show(i); wake();
+
+</script>
+<script>
+
+// Arrows between cards. Sides: l r t b; the number is where along that side the wire attaches (0–1).
+const wires = [
+  ['USERS', 'r', .35, 'APP', 'l', .4],
+  ['DEMO', 'r', .5, 'APP', 'l', .8, null, 'dash'],
+  ['APP', 'r', .4, 'SEC', 'l', .4],
+  ['SEC', 'b', .5, 'API', 't', .5],
+  ['API', 'r', .3, 'CHAT', 'l', .6],
+  ['API', 'r', .7, 'REC', 'l', .5],
+  ['CHAT', 'b', .5, 'REC', 't', .5, 'recommend'],
+  ['CHAT', 'r', .8, 'COORD', 't', .25, 'plan'],
+  ['PRO', 'b', .7, 'COORD', 't', .7, 'all said yes'],
+  ['COORD', 'b', .3, 'PA', 't', .75, 'proposal', null, 0, { lt: .3 }],
+  ['PA', 'b', .3, 'RULES', 't', .2],
+  ['RULES', 't', .88, 'COORD', 'b', .72, '✓ / ✗ only', null, 30, { lt: .25 }],
+  ['CHAT', 't', .7, 'GEM', 'l', .3, null, null, 0, { c1y: 30, c2: [1150, 30] }],
+  ['PA', 'r', .2, 'GEM', 'l', .75, null, null, 0, { via: 1151 }],
+  ['GEM', 'b', .5, 'NV', 't', .5, null, 'dash'],
+  ['NV', 'b', .5, 'LOC', 't', .5, null, 'dash'],
+  ['RULES', 'r', .5, 'WEB', 'l', .6, null, null, 40],
+  ['RULES', 'l', .5, 'DB', 'r', .5],
+  ['SEED', 'r', .5, 'DB', 'l', .5, null, 'dash'],
+  ['DB', 't', .35, 'SSE', 'b', .4, 'new revision'],
+  ['SSE', 'l', .5, 'APP', 'b', .5, 'live', null]
+];
+const steps = [['CHAT', 1], ['COORD', 2], ['PA', 3], ['API', 4], ['SSE', 5]];
+const stickers = [
+  // where: tr (top-right), tc (top-centre), br (bottom-right), r (right edge, centred)
+  ['PA', '1 AGENT PER FRIEND', 'var(--coral)', -3, 'br'],
+  ['SSE', 'LIVE', 'var(--coral)', 5, 'tr'],
+  ['DB', 'ENCRYPTED', 'var(--green)', -3, 'tr'],
+
+];
+
+const canvas = document.getElementById('canvas'), svg = document.getElementById('wires');
+const box = id => { const n = document.getElementById(id); return { x: n.offsetLeft, y: n.offsetTop, w: n.offsetWidth, h: n.offsetHeight }; };
+const anchor = (id, side, t) => { const b = box(id);
+  return side === 'l' ? [b.x, b.y + b.h * t, -1, 0] : side === 'r' ? [b.x + b.w, b.y + b.h * t, 1, 0] : side === 't' ? [b.x + b.w * t, b.y, 0, -1] : [b.x + b.w * t, b.y + b.h, 0, 1]; };
+const add = (tag, attrs, parent) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+const div = (cls, text, css) => { const d = document.createElement('span'); d.className = cls; d.textContent = text; d.style.cssText = css; canvas.appendChild(d); return d; };
+
+function draw() {
+  for (const [from, fs, ft, to, ts, tt, label, style, bend, opt = {}] of wires) {
+    const [x1, y1, dx1, dy1] = anchor(from, fs, ft), [x2, y2, dx2, dy2] = anchor(to, ts, tt);
+    const k = bend || Math.max(30, Math.hypot(x2 - x1, y2 - y1) * .4);
+    // via: run the wire up a vertical gutter at that x instead of cutting across cards.
+    let c1 = opt.via ? [opt.via, y1] : [x1 + dx1 * k, y1 + dy1 * k], c2 = opt.via ? [opt.via, y2] : [x2 + dx2 * k, y2 + dy2 * k];
+    if (opt.c1y != null) c1 = [x1, opt.c1y]; // explicit control points for wires that must arc over a card
+    if (opt.c2) c2 = opt.c2;
+    add('path', { d: `M${x1} ${y1} C${c1} ${c2} ${x2} ${y2}`, class: style || '', 'marker-end': `url(#${style === 'dash' ? 'ahd' : 'ah'})` }, svg);
+    if (label) { const t = opt.lt ?? .5, m = (a, b, c, d) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d;
+      div('wl' + (style === 'dash' ? ' dash' : ''), label, `left:${m(x1, c1[0], c2[0], x2)}px;top:${m(y1, c1[1], c2[1], y2)}px`); }
+  }
+  for (const [id, n] of steps) { const b = box(id); div('step', n, `left:${b.x - 13}px;top:${b.y - 13}px`); }
+  for (const [id, text, c, tilt, where] of stickers) { const b = box(id);
+    const s = div('sticker', text, `--c:${c};--tilt:${tilt}deg`), w = s.offsetWidth, h = s.offsetHeight;
+    const [x, y] = { tr: [b.x + b.w - w + 8, b.y - 13], tc: [b.x + (b.w - w) / 2, b.y - 13], br: [b.x + b.w - w + 8, b.y + b.h - h + 10], r: [b.x + b.w - w * .55, b.y + b.h / 2 - h / 2] }[where];
+    s.style.left = `${x}px`; s.style.top = `${y}px`; }
+  // Fit the fixed canvas into whatever space the card leaves.
+  const host = document.getElementById('diagram'), scale = Math.min(1, host.clientWidth / 1340, host.clientHeight / 740);
+  canvas.style.transform = `scale(${scale})`; canvas.style.transformOrigin = 'center';
+  document.body.dataset.ready = 'true';
+}
+document.fonts.ready.then(draw);
+
+</script>
+</body>
+</html>
