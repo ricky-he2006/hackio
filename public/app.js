@@ -852,7 +852,7 @@ function detailsScreen(p) {
     <div class="row wrap gap-8">${p.isHost && p.state === 'confirmed' ? `<button class="pill primary" data-action="book" data-id="${esc(p.id)}">Preview booking</button>` : ''}${['confirmed', 'booked'].includes(p.state) ? `<button class="pill" data-action="calendar" data-id="${esc(p.id)}">Add to calendar</button>` : ''}<button class="pill" data-action="plan-facts" data-id="${esc(p.id)}">Venue details</button></div>
     ${p.log.length ? `<details class="more" data-key="log-${esc(p.id)}" ${ui.open.has('log-' + p.id) ? 'open' : ''}><summary>${I.chevron} How the agents negotiated</summary>${p.log.map(l => `<p>Round ${l.round}: ${esc(l.userId ? `${nameOf(p.participants.find(u => u.id === l.userId))}’s agent: ` : '')}${esc(l.text)}</p>`).join('')}</details>` : ''}
     <p class="meta-12">${p.mode === 'local' ? 'Local demo agents check real constraints against your proposal.' : `Agent provider: ${esc(p.mode)}`} The cost is a proposed meal allowance, not a menu price.</p>
-  </main>${footer ? `<footer class="footbar tight">${footer}</footer>` : ''}${tabbar(rootTab())}`;
+  </main>${footer ? `<footer class="footbar tight ${(footer.match(/<button/g) || []).length > 2 ? 'trio' : ''}">${footer}</footer>` : ''}${tabbar(rootTab())}`;
 }
 
 /* Change something (host tweak or invitee message) */

@@ -60,10 +60,13 @@ img{display:block}
 .footbar{flex-shrink:0;padding:14px 20px 20px 16px;border-top:2px solid var(--ink);background:var(--paper);display:flex;gap:10px;color:var(--ink)}
 .footbar.col{flex-direction:column;gap:8px}
 .footbar.tight{padding:12px 20px 12px 16px}
+/* Three actions share a phone-width row: labels may wrap to two centred lines instead of spilling out. */
+.footbar.trio{gap:8px}.footbar.trio>.btn{white-space:normal;text-align:center;line-height:17px;font-size:14px;padding:0 8px}
 .tabbar{height:60px;flex-shrink:0;border-top:2px solid var(--ink);background:var(--paper);display:flex;align-items:center;justify-content:space-around;padding:0 8px calc(env(safe-area-inset-bottom)) ;color:var(--ink)}
 .tab{position:relative;height:40px;padding:0 12px;display:flex;align-items:center;font-size:14px;font-weight:600;color:var(--muted);border-radius:999px;border:2px solid transparent}
 .tab.active{padding:0 16px;background:var(--purple);border-color:var(--ink);font-weight:700;color:var(--ink)}
 .tab .dot{position:absolute;top:4px;right:2px;width:10px;height:10px;border-radius:999px;background:var(--coral);border:2px solid var(--ink)}
+.tab.active .dot{top:-5px;right:-3px;width:12px;height:12px;box-shadow:0 0 0 2px var(--paper)} /* a badge on the pill's corner, not on its outline */
 
 /* Cards */
 .card{position:relative;background:var(--paper);border:2px solid var(--ink);border-radius:14px;color:var(--ink)}
