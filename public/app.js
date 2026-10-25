@@ -6,10 +6,11 @@ const slot = new URLSearchParams(location.search).get('slot') || 'single';
 const inviteParam = new URLSearchParams(location.search).get('invite');
 const tokenKey = `disco-session-${slot}`;
 const MAIN_IDS = ['ricky', 'aditya', 'arnav', 'daniel'];
-let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', chatLens = {}, searchTimer;
+let token = sessionStorage.getItem(tokenKey), S = null, pending = false, streamController, refreshTimer, lastKey = '', chatLens = {}, searchTimer, refreshVersion = 0;
 let stack = [{ name: 'chat' }];
 const drafts = {}, scrolls = {};
-const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', psort: 'recent', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: new Set(JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]')) };
+function storedNotifications() { try { const value = JSON.parse(localStorage.getItem(`disco-read-${slot}`) || '[]'); return new Set(Array.isArray(value) ? value : []); } catch { return new Set(); } }
+const ui = { filter: 'All', ptab: 'been', pcat: 'Eat & Drink', psort: 'recent', catOpen: false, comments: new Set(), imports: {}, quick: null, nights: {}, logs: {}, newTag: false, qr: false, skipWelcome: false, open: new Set(), crew: { open: false, friends: new Set(), placeId: null, placeName: null, query: 'restaurants' }, location: null, locationStatus: 'fallback', readNotifications: storedNotifications() };
 
 /* ---------- Icons (drawn from the mockup boards) ---------- */
 const svg = (w, h, inner, attrs = '') => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false" ${attrs}>${inner}</svg>`;
@@ -136,7 +137,7 @@ function status(p) {
   if (p.state === 'cancelled') return { key: 'cancelled', label: 'Cancelled', cls: 'gray', bg: '#E4E1DA' };
   if (['confirmed', 'booked'].includes(p.state)) return { key: 'confirmed', label: 'Confirmed', cls: 'green', bg: '#79D18A' };
   if (p.isHost && ['awaiting_approval', 'needs_decision'].includes(p.state)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
-  if (!p.isHost && ['invited', 'needs_decision'].includes(p.state) && ['pending', 'reconfirm'].includes(p.myRsvp)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
+  if (!p.isHost && p.canRsvp && ['pending', 'reconfirm'].includes(p.myRsvp)) return { key: 'ok', label: 'Needs your OK', cls: 'coral', bg: '#FF6F59' };
   return { key: 'working', label: 'Working it out', cls: 'yellow', bg: '#FFD666' };
 }
 function statusLine(p) {
@@ -164,15 +165,24 @@ const needsMe = () => S.plans.some(p => status(p).key === 'ok');
 
 /* ---------- Networking ---------- */
 async function api(path, data) {
+  const requestToken = token;
   const response = await fetch('/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: data === undefined ? undefined : JSON.stringify(data) });
   const result = await response.json();
-  if (!response.ok) { if (response.status === 401 && path !== '/login') logoutLocal(); throw new Error(result.error || 'Please try again.'); }
+  if (!response.ok) { if (response.status === 401 && path !== '/login' && token === requestToken) logoutLocal(); throw new Error(result.error || 'Please try again.'); }
   return result;
 }
 function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 4200); }
 async function refresh() {
   if (!token) return;
-  try { const query = ui.location ? `?lat=${encodeURIComponent(ui.location.lat)}&lon=${encodeURIComponent(ui.location.lon)}` : ''; S = await api('/state' + query); const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id)); render(); } catch (error) { toast(error.message); }
+  const requestToken = token, version = ++refreshVersion;
+  try {
+    const query = ui.location ? `?lat=${encodeURIComponent(ui.location.lat)}&lon=${encodeURIComponent(ui.location.lon)}` : '';
+    const state = await api('/state' + query);
+    if (token !== requestToken || version !== refreshVersion) return;
+    S = state;
+    const r = cur(); if (r.name === 'place' && r.data) r.data = await api('/place?id=' + encodeURIComponent(r.id));
+    if (token === requestToken && version === refreshVersion) render();
+  } catch (error) { if (token === requestToken) toast(error.message); }
 }
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 100); }
 async function live() {
@@ -188,7 +198,13 @@ async function live() {
     if (!controller.signal.aborted) await new Promise(r => setTimeout(r, 2000));
   }
 }
-function logoutLocal() { token = null; S = null; ui.crew = { open: false, friends: new Set() }; delete drafts['adventure-message']; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen(); }
+function logoutLocal() {
+  token = null; S = null; pending = false; refreshVersion++; clearTimeout(refreshTimer); clearTimeout(searchTimer);
+  for (const key of Object.keys(drafts)) delete drafts[key];
+  for (const key of Object.keys(scrolls)) delete scrolls[key];
+  Object.assign(ui, { crew: { open: false, friends: new Set() }, logs: {}, nights: {}, quick: null, imports: {}, location: null, locationStatus: 'fallback', comments: new Set(), open: new Set(), newTag: false });
+  lastKey = ''; chatLens = {}; sessionStorage.removeItem(tokenKey); streamController?.abort(); stack = [{ name: 'chat' }]; loginScreen().catch(error => toast(error.message));
+}
 async function login(username, password) {
   const result = await api('/login', { username, password }); token = result.token; sessionStorage.setItem(tokenKey, token); stack = [{ name: 'chat' }]; await refresh();
   if (inviteParam) { try { const preview = await api('/invite?from=' + encodeURIComponent(inviteParam)); stack.push({ name: 'invite-preview', id: inviteParam, data: preview }); } catch (error) { toast(error.message); } }
@@ -205,9 +221,9 @@ function back() { if (stack.length > 1) stack.pop(); else stack = [{ name: 'chat
 function tab(name) { stack = [{ name }]; ui.catOpen = false; render(); }
 function openPlan(id) { const p = findPlan(id); if (p) go(planRoute(p), { id }); }
 async function load() {
-  const r = cur();
+  const r = cur(), requestToken = token; delete r.error;
   try {
-    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (r.name === 'log') initLog(r.data, r.rating); }
+    if ((r.name === 'place' || r.name === 'log') && !r.data) { r.data = await api('/place?id=' + encodeURIComponent(r.id)); if (token !== requestToken) return; if (r.name === 'log' && cur() === r) initLog(r.data, r.rating); }
     else if (r.name === 'friend-profile' && !r.data) r.data = await api('/profile?id=' + encodeURIComponent(r.id));
     else if (r.name === 'catalog' && !r.data) r.data = await api('/catalog?q=' + encodeURIComponent(drafts['catalog-q'] || ''));
     else if (r.name === 'quickrate' && !ui.quick) ui.quick = { i: 0, answers: [], picks: await api('/quickrate') };
@@ -217,8 +233,8 @@ async function load() {
       r.data = await api('/facts', plan ? { placeId: plan.option.place.id, date: plan.option.date, time: plan.option.time } : { placeId: r.placeId, date: S.defaultDate, time: '19:00' });
     }
     else return;
-    if (cur() === r) render();
-  } catch (error) { toast(error.message); }
+    if (token === requestToken && cur() === r) render();
+  } catch (error) { if (token === requestToken && cur() === r) { r.error = error.message; render(); } }
 }
 
 /* ---------- Shared pieces ---------- */
@@ -314,6 +330,7 @@ function routeList(o, { rail = true, actions = false, party = 1 } = {}) {
 
 /* ---------- Screens ---------- */
 function screen(r) {
+  if (r.error) return `${titlebar('Couldn’t load this screen')}<main class="content"><p class="body-15">${esc(r.error)}</p><button class="btn primary" data-action="retry-load">Try again</button></main>`;
   if (r.name === 'chat' && !S.me.onboarded && !ui.skipWelcome) return welcomeScreen();
   const p = r.id ? findPlan(r.id) : null;
   switch (r.name) {
@@ -342,7 +359,7 @@ function screen(r) {
     case 'working': return workingScreen(p);
     case 'approve': return p.isHost && p.state === 'awaiting_approval' ? approveScreen(p) : detailsScreen(p);
     case 'changed': return p.isHost && p.state === 'awaiting_approval' && p.hasPendingChange ? changedScreen(p) : detailsScreen(p);
-    case 'invite': return !p.isHost && p.state === 'invited' ? inviteScreen(p) : detailsScreen(p);
+    case 'invite': return !p.isHost && p.canRsvp ? inviteScreen(p) : detailsScreen(p);
     case 'change': return changeScreen(p);
     case 'rate': return rateScreen(p);
     default: return detailsScreen(p);
@@ -487,7 +504,7 @@ function crewCard() {
   <p class="meta">You pick the people — agents never add or remove anyone. Each friend’s budget and calendar stay with their own agent.</p></div></div>`;
 }
 function matchCard(m) {
-  const members = [S.me, ...m.friends], p = m.place, count = members.length, plannable = m.friends.some(f => MAIN_IDS.includes(f.id) && !f.fictional);
+  const members = [S.me, ...m.friends], p = m.place, count = members.length, plannable = ['Eat & Drink', 'Places', 'Live Events'].includes(group(p)) && m.friends.some(f => MAIN_IDS.includes(f.id) && !f.fictional);
   const when = m.window ? `, and ${count > 2 ? 'everyone’s' : 'you’re both'} free ${dparts(m.window.date).long} ${partOfDay(m.window.time)}` : '';
   return `<div class="agent-block"><p class="agent-text">Good timing: ${count > 2 ? `${WORDS[count] || count} of you want` : `you and ${first(m.friends[0])} both want`} to try the same spot${when}.</p>
   <article class="card r16 pad-14 sh-5 col gap-12" style="padding:14px">${sticker('It’s a match', 'yellow', 4, 'top:-12px;right:14px;padding:3px 10px')}
@@ -589,6 +606,7 @@ async function pickReviewPhoto(file, placeId) {
 function logScreen(r) {
   const p = r.data;
   if (!p) return `${titlebar('Log it', { close: true, cls: 'inline', size: 't24' })}<main class="content" data-scroll><p class="meta">Loading…</p></main>`;
+  initLog(p, r.rating);
   const st = ui.logs[p.id], tags = [...new Set([...TAGS, ...st.tags])];
   return `${titlebar('Log it', { close: true, cls: 'inline', size: 't24' })}
   <main class="content gap-22" data-scroll>
@@ -822,7 +840,7 @@ function detailsScreen(p) {
   const cancelButton = p.isHost && !['cancelled', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="cancel" data-id="${esc(p.id)}">Cancel plan</button>` : '';
   const footer = p.isHost && p.state === 'awaiting_approval' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}<button class="btn primary h48" data-action="${p.hasPendingChange ? 'changed' : 'approve-open'}" data-id="${esc(p.id)}">${p.hasPendingChange ? 'Review change' : 'See the route'}</button>`
     : !p.isHost && st.key === 'ok' ? `<button class="btn h48" data-action="rsvp-out" data-id="${esc(p.id)}">Can’t make it</button><button class="btn primary h48" data-action="rsvp-in" data-id="${esc(p.id)}">${p.myRsvp === 'reconfirm' ? 'Still in' : 'I’m in'}</button>`
-    : ['confirmed', 'booked'].includes(p.state) ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}<button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
+    : ['confirmed', 'booked'].includes(p.state) ? `${p.state === 'confirmed' ? `<button class="btn h48" data-action="change" data-id="${esc(p.id)}">Change something</button>` : ''}${cancelButton}<button class="btn primary h48" data-action="rate" data-id="${esc(p.id)}">${p.myNightRating != null ? 'Your ratings' : 'Rate the night'}</button>`
     : p.isHost && ['invited', 'needs_decision'].includes(p.state) ? `<button class="btn primary h48" data-action="change" data-id="${esc(p.id)}">Change something</button>${cancelButton}` : '';
   const history = [...p.history].reverse().slice(0, 8);
   return `${titlebar(esc(p.title), { size: 't30', sub: `${d.short} · ${t12(p.option.time)} · ~$${esc(p.option.allowance)} each`, right: openChatButton(p) })}
@@ -866,7 +884,7 @@ function friendProfileScreen(r) {
   const reviewRows = p.reviews.map(rv => `<article class="card pad row top gap-10">${av(rv.author, 34)}<div class="grow"><p class="row between body-14"><span class="strong">${esc(rv.place?.name || 'Place')}</span>${score(rv.rating)}</p><p class="quote q-22">“${esc(rv.quote)}”</p><p class="meta-12">${rv.synthetic ? 'Demo opinion' : ago(rv.date)}</p></div></article>`).join('');
   const list = (items, label) => `<section class="stack gap-8"><h2 class="eyebrow">${label}</h2>${items.slice(0, 12).map(place => `<button class="card row-pad row" style="text-align:left" data-action="place" data-id="${esc(place.id)}"><span class="grow"><span class="body-15 strong">${esc(place.name)}</span><span class="meta-12">${esc(place.area || '')}</span></span>${tagPill(place)}</button>`).join('') || '<p class="meta">Nothing here yet.</p>'}</section>`;
   return `${titlebar(esc(p.user.name), { sub: [p.user.area, p.user.fictional ? 'demo person' : ''].filter(Boolean).join(' · ') })}<main class="content gap-16" data-scroll>
-    <section class="card purple pad col gap-10"><div class="row gap-12">${av(p.user, 56)}<div><h2 class="h-21">${esc(p.user.name)}</h2><p class="meta">${p.stats.been} Been · ${p.stats.wantToTry} Want to try · ${p.stats.friends} Friends</p></div></div><button class="btn primary h44" data-action="plan-friend" data-id="${esc(p.user.id)}">Plan something together</button></section>
+    <section class="card purple pad col gap-10"><div class="row gap-12">${av(p.user, 56)}<div><h2 class="h-21">${esc(p.user.name)}</h2><p class="meta">${p.stats.been} Been · ${p.stats.wantToTry} Want to try · ${p.stats.friends} Friends</p></div></div>${MAIN_IDS.includes(p.user.id) ? `<button class="btn primary h44" data-action="plan-friend" data-id="${esc(p.user.id)}">Plan something together</button>` : '<p class="meta">Demo profile · planning is available with the four prepared accounts.</p>'}</section>
     ${list(p.been, 'Been')}${list(p.wantToTry, 'Want to try')}
     <section class="stack gap-8"><h2 class="eyebrow">Reviews</h2>${reviewRows || '<p class="meta">No visible reviews yet.</p>'}</section>
   </main>`;
@@ -961,6 +979,7 @@ function factsScreen(r) {
 /* Login */
 async function loginScreen() {
   const [accounts, health] = await Promise.all([api('/accounts'), api('/health')]);
+  if (token) return;
   $('#app').innerHTML = `<main class="login"><div class="progress" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div><div class="row gap-12">${ball(66)}<div><p class="wordmark" style="font-size:44px;line-height:46px">Disco</p><p class="eyebrow muted" style="letter-spacing:.08em;margin-top:6px">Stress less, party more</p></div></div>
     <h1 class="title t30">Your friends’ picks, turned into plans.</h1><p class="body-15 muted">Ask for anything your friends vouch for. Pick your people, and your agents work out the rest.</p>
     <form id="login-form" class="card r16 pad-16 sh-4 form"><fieldset style="border:0;padding:0;margin:0"><legend class="eyebrow" style="margin-bottom:8px">Who are you?</legend><div class="toggle-row">${accounts.map((u, i) => `<label><input type="radio" name="username" value="${esc(u.id)}" ${(slot === u.id || (!MAIN_IDS.includes(slot) && i === 0)) ? 'checked' : ''}><span>${av(u, 28)}${esc(u.name)}</span></label>`).join('')}</div></fieldset>
@@ -975,8 +994,17 @@ function render() {
   if (prev && lastKey) scrolls[lastKey] = prev.scrollTop;
   const active = document.activeElement, focusId = active?.id && active !== document.body ? active.id : null;
   const selection = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+  // SSE and photo responses redraw the screen. Preserve unsaved named form
+  // controls (settings, calendar, route edits), which do not use the chat drafts.
+  const fields = key === lastKey ? [...document.querySelectorAll('form[id] [name]')].filter(el => el.type !== 'file').map(el => ({ form: el.form.id, name: el.name, type: el.type, value: el.value, checked: el.checked, focused: el === active })) : [];
   let html; try { html = screen(r); } catch (error) { console.error(error); html = `${titlebar('Something went wrong')}<main class="content"><p class="body-15">${esc(error.message)}</p></main>`; }
   $('#app').innerHTML = `<div class="app-shell">${html.includes('class="screen') ? html : `<div class="screen">${html}</div>`}</div>`;
+  for (const field of fields) {
+    const el = [...(document.getElementById(field.form)?.elements || [])].find(el => el.name === field.name && (!['checkbox', 'radio'].includes(field.type) || el.value === field.value));
+    if (!el) continue;
+    if (['checkbox', 'radio'].includes(field.type)) el.checked = field.checked; else el.value = field.value;
+    if (field.focused) el.focus({ preventScroll: true });
+  }
   const main = $('[data-scroll]');
   if (main) {
     // Each chat (main or an adventure's) jumps to the bottom when it gains messages, and keeps its own scroll otherwise.
@@ -1049,6 +1077,7 @@ document.addEventListener('click', async event => {
   if (action !== 'cat-toggle' && action !== 'cat') ui.catOpen = false;
   try {
     switch (action) {
+      case 'retry-load': await load(); break;
       case 'tab': tab(el.dataset.view); break;
       case 'back': back(); break;
       case 'prompt': tab('chat'); await sendChat(el.dataset.text); break;
@@ -1078,7 +1107,7 @@ document.addEventListener('click', async event => {
         el.disabled = true; const posted = await api('/reviews', { reviewId: cur().reviewId, placeId: id, rating: st.rating, quote, tags: [...st.tags].map(t => t.toLowerCase()) });
         try { if (st.photoData) await api('/review-photo', { reviewId: posted.id, image: st.photoData }); else if (st.removePhoto) await api('/review-photo', { reviewId: posted.id, remove: true }); }
         catch (error) { toast(`Posted, but the photo didn’t upload: ${error.message}`); }
-        delete drafts.note; delete ui.logs[id]; await refresh(); back(); toast('Posted. Your friends’ picks just updated.'); break;
+        back(); delete drafts.note; delete ui.logs[id]; await refresh(); toast('Posted. Your friends’ picks just updated.'); break;
       }
       case 'edit-review': { const review = S.myReviews.find(r => r.placeId === id); if (review) go('log', { id, reviewId: review.id }); break; }
       case 'delete-review': if (confirm('Delete this review?')) { await api('/reviews/delete', { reviewId: id }); await refresh(); toast('Review deleted.'); } break;
@@ -1119,7 +1148,7 @@ document.addEventListener('click', async event => {
       case 'clear-temporary': await api('/temporary/clear', {}); await refresh(); toast('Cleared.'); break;
       case 'match-plan': {
         const m = S.matches.find(x => x.place.id === id), friends = m.friends.filter(f => MAIN_IDS.includes(f.id)).map(f => f.id); el.disabled = true;
-        await createPlan({ title: `${m.place.name} with ${names(m.friends.filter(f => friends.includes(f.id)).map(f => f.name.split(' ')[0]))}`, friends, placeId: group(m.place) === 'Eat & Drink' ? id : undefined, date: m.window?.date || S.defaultDate, time: m.window?.time || '19:00', allowance: 24, query: m.place.name });
+        await createPlan({ title: `${m.place.name} with ${names(m.friends.filter(f => friends.includes(f.id)).map(f => f.name.split(' ')[0]))}`, friends, placeId: group(m.place) === 'Eat & Drink' ? id : undefined, activityId: group(m.place) === 'Eat & Drink' ? undefined : id, date: m.window?.date || S.defaultDate, time: m.window?.time || '19:00', allowance: 24, query: group(m.place) === 'Eat & Drink' ? m.place.name : 'restaurants' });
         break;
       }
       case 'match-dismiss': await api('/matches/dismiss', { placeId: id }); await refresh(); toast('Hidden for two weeks.'); break;

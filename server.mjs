@@ -22,7 +22,10 @@ const modelRoutes = new Set(['/api/chat', '/api/adventure-draft', '/api/facts', 
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); };
 async function body(req, max = 24000) {
   let content = ''; for await (const chunk of req) { content += chunk; if (content.length > max) throw new AppError('Request too large.', 413); }
-  try { return content ? JSON.parse(content) : {}; } catch { throw new AppError('Invalid JSON.'); }
+  let value;
+  try { value = content ? JSON.parse(content) : {}; } catch { throw new AppError('Invalid JSON.'); }
+  assert(value !== null && typeof value === 'object' && !Array.isArray(value), 'Send a JSON object.');
+  return value;
 }
 function calendar(p) {
   const escape = s => String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
